@@ -155,39 +155,48 @@ export class TwitterClient {
         replyToTweetId: args.replyToTweetId,
         textLength: args.text.length
       })
-      const { body, status, queryId } = await this.withCreateTweetQueryIdRetry(async (candidateQueryId) => {
-        return this.createTweetGql.post(
-          'CreateTweet',
-          candidateQueryId,
-          variables,
-          buildTweetCreateFeatures(),
-          {},
-          this.headers.jsonHeaders({ authType: 'OAuth2Client', origin: 'https://twitter.com', referer: 'https://twitter.com/' })
-        )
-      })
-      await this.logDebug('reply.createTweet.response', {
-        status,
-        queryId,
-        body: safeJsonSnippet(body)
-      })
-      const tweetId = getStr(getMap(getMap(getMap(body, 'data'), 'create_tweet'), 'tweet_results')?.result, 'rest_id')
-      if (tweetId !== '') {
-        return { ok: true, tweetId }
-      }
-      const error = firstError(body)
-      if (error.message !== '') {
-        const message = `CreateTweet failed${error.code ? ` (code ${error.code})` : ''}: ${error.message}`
-        await this.logDebug('reply.createTweet.failure', { status, queryId, message, body: safeJsonSnippet(body) })
-        return { ok: false, error: message, code: error.code, status }
-      }
-      if (status === 401 || status === 403) {
-        const message = 'CreateTweet failed: X rejected the saved cookies; refresh auth_token and ct0'
-        await this.logDebug('reply.createTweet.failure', { status, queryId, message, body: safeJsonSnippet(body) })
+      let lastFailure: PostResult | undefined
+      for (const strategy of createTweetHeaderStrategies(this.headers)) {
+        const { body, status, queryId } = await this.withCreateTweetQueryIdRetry(async (candidateQueryId) => {
+          return this.createTweetGql.post(
+            'CreateTweet',
+            candidateQueryId,
+            variables,
+            buildTweetCreateFeatures(),
+            {},
+            strategy.headers
+          )
+        })
+        await this.logDebug('reply.createTweet.response', {
+          status,
+          queryId,
+          strategy: strategy.name,
+          body: safeJsonSnippet(body)
+        })
+        const tweetId = getStr(getMap(getMap(getMap(body, 'data'), 'create_tweet'), 'tweet_results')?.result, 'rest_id')
+        if (tweetId !== '') {
+          return { ok: true, tweetId }
+        }
+        const error = firstError(body)
+        if (error.message !== '') {
+          const message = `CreateTweet failed${error.code ? ` (code ${error.code})` : ''}: ${error.message}`
+          await this.logDebug('reply.createTweet.failure', { status, queryId, strategy: strategy.name, message, body: safeJsonSnippet(body) })
+          lastFailure = { ok: false, error: message, code: error.code, status }
+          if (error.code === 344 || error.code === 226) {
+            continue
+          }
+          return lastFailure
+        }
+        if (status === 401 || status === 403) {
+          const message = 'CreateTweet failed: X rejected the saved cookies; refresh auth_token and ct0'
+          await this.logDebug('reply.createTweet.failure', { status, queryId, strategy: strategy.name, message, body: safeJsonSnippet(body) })
+          return { ok: false, error: message, status }
+        }
+        const message = `CreateTweet returned HTTP ${status} but no tweet ID; body=${safeJsonSnippet(body, 500)}`
+        await this.logDebug('reply.createTweet.failure', { status, queryId, strategy: strategy.name, message, body: safeJsonSnippet(body) })
         return { ok: false, error: message, status }
       }
-      const message = `CreateTweet returned HTTP ${status} but no tweet ID; body=${safeJsonSnippet(body, 500)}`
-      await this.logDebug('reply.createTweet.failure', { status, queryId, message, body: safeJsonSnippet(body) })
-      return { ok: false, error: message, status }
+      return lastFailure ?? { ok: false, error: 'CreateTweet failed before receiving a response' }
     } catch (error) {
       const message = `request error: ${errorMessage(error)}`
       await this.logDebug('reply.createTweet.exception', { message })
@@ -257,6 +266,25 @@ export class TwitterClient {
       // Debug logging must never break user actions.
     }
   }
+}
+
+const createTweetHeaderStrategies = (headers: HeaderBuilder): Array<{ name: string; headers: HeadersInit }> => {
+  const base = headers.jsonHeaders({ origin: 'https://twitter.com', referer: 'https://twitter.com/' }) as Record<string, string>
+  const minimal: Record<string, string> = {}
+  for (const key of ['accept', 'accept-language', 'authorization', 'cookie', 'content-type', 'user-agent', 'x-csrf-token']) {
+    const value = base[key]
+    if (value) {
+      minimal[key] = value
+    }
+  }
+  minimal.origin = 'https://twitter.com'
+  minimal.referer = 'https://twitter.com/'
+
+  return [
+    { name: 'browser-minimal', headers: minimal },
+    { name: 'oauth2-client', headers: headers.jsonHeaders({ authType: 'OAuth2Client', origin: 'https://twitter.com', referer: 'https://twitter.com/' }) },
+    { name: 'oauth2-session', headers: base }
+  ]
 }
 
 const parseCurrentUser = (text: string): AuthStatus => {
