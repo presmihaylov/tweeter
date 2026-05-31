@@ -11,6 +11,7 @@ type CliOptions = {
   resetAuth: boolean
   debugLog?: string
   renderer?: 'auto' | 'chafa' | 'kitty' | 'none'
+  setCookieHeader?: string
   checkAuth: boolean
   help: boolean
 }
@@ -50,6 +51,11 @@ const parseArgs = (argv: string[]): CliOptions => {
       i += 1
       continue
     }
+    if (arg === '--set-cookie-header') {
+      opts.setCookieHeader = nextValue(argv, i, arg)
+      i += 1
+      continue
+    }
     throw new Error(`unknown argument: ${arg}`)
   }
   return opts
@@ -72,6 +78,7 @@ const usage = `birdtui
 Usage:
   bird [--profile name] [--renderer auto|chafa|kitty|none] [--debug-log path]
   bird --check-auth [--profile name]
+  bird --set-cookie-header 'name=value; ...' [--profile name]
   bird --reset-auth
 
 Keys:
@@ -92,6 +99,20 @@ const main = async (): Promise<void> => {
   const store = new ConfigStore()
   const config = await store.load()
   const selected = getProfile(config, opts.profile)
+  if (opts.setCookieHeader) {
+    if (!selected) {
+      console.error('no profile configured')
+      process.exitCode = 1
+      return
+    }
+    await store.upsertProfile(selected.name, {
+      authToken: selected.profile.authToken,
+      ct0: selected.profile.ct0,
+      cookieHeader: opts.setCookieHeader
+    })
+    console.log(`saved full cookie header for profile ${selected.name}`)
+    return
+  }
   if (opts.checkAuth) {
     if (!selected) {
       console.error('no profile configured')

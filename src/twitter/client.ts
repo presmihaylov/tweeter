@@ -157,7 +157,9 @@ export class TwitterClient {
       await this.logDebug('reply.createTweet.start', {
         isReply: Boolean(args.replyToTweetId),
         replyToTweetId: args.replyToTweetId,
-        textLength: args.text.length
+        textLength: args.text.length,
+        cookieNames: cookieNames(this.headers.cookieHeader()),
+        hasFullCookieHeader: this.headers.cookieHeader().split(';').length > 2
       })
       let lastFailure: PostResult | undefined
       for (const strategy of createTweetHeaderStrategies(this.headers)) {
@@ -183,7 +185,7 @@ export class TwitterClient {
         }
         const error = firstError(body)
         if (error.message !== '') {
-          const message = `CreateTweet failed${error.code ? ` (code ${error.code})` : ''}: ${error.message}`
+          const message = enrichCreateTweetError(`CreateTweet failed${error.code ? ` (code ${error.code})` : ''}: ${error.message}`, error.code, this.headers.cookieHeader())
           await this.logDebug('reply.createTweet.failure', { status, queryId, strategy: strategy.name, message, body: safeJsonSnippet(body) })
           lastFailure = { ok: false, error: message, code: error.code, status }
           if (error.code === 344 || error.code === 226) {
@@ -270,6 +272,17 @@ export class TwitterClient {
       // Debug logging must never break user actions.
     }
   }
+}
+
+const enrichCreateTweetError = (message: string, code: number | undefined, cookieHeader: string): string => {
+  if ((code === 344 || code === 226) && cookieHeader.split(';').length <= 2) {
+    return `${message}\nLikely missing full browser Cookie header. Save the curl -b cookie string with: bird --set-cookie-header 'name=value; ...'`
+  }
+  return message
+}
+
+const cookieNames = (cookieHeader: string): string[] => {
+  return cookieHeader.split(';').map((part) => part.trim().split('=')[0] ?? '').filter((name) => name !== '')
 }
 
 const createTweetHeaderStrategies = (headers: HeaderBuilder): Array<{ name: string; headers: HeadersInit }> => {

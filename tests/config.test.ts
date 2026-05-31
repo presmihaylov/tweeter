@@ -23,4 +23,14 @@ describe('config', () => {
     const raw = JSON.parse(await readFile(path, 'utf8')) as { profiles: Record<string, { ct0: string }> }
     expect(raw.profiles.default?.ct0).toBe('csrf')
   })
+
+  test('preserves and updates full cookie header', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'birdtui-config-'))
+    const path = join(dir, 'config.json')
+    const store = new ConfigStore(path)
+    await store.upsertProfile('default', { authToken: 'auth', ct0: 'csrf', cookieHeader: 'auth_token=auth; ct0=csrf; twid=u%3D1' })
+    await store.upsertProfile('default', { authToken: 'auth2', ct0: 'csrf2' })
+    const raw = JSON.parse(await readFile(path, 'utf8')) as { profiles: Record<string, { cookieHeader?: string }> }
+    expect(raw.profiles.default?.cookieHeader).toBe('auth_token=auth; ct0=csrf; twid=u%3D1')
+  })
 })

@@ -30,13 +30,14 @@ export class ConfigStore {
     await writeJsonFile(this.path, parsed)
   }
 
-  async upsertProfile(name: string, profile: Pick<BirdTuiProfile, 'authToken' | 'ct0'>): Promise<BirdTuiConfig> {
+  async upsertProfile(name: string, profile: Pick<BirdTuiProfile, 'authToken' | 'ct0'> & Pick<Partial<BirdTuiProfile>, 'cookieHeader'>): Promise<BirdTuiConfig> {
     const cfg = await this.load()
     const existing = cfg.profiles[name]
     const timestamp = nowIso()
     const nextProfile: BirdTuiProfile = {
       authToken: profile.authToken,
       ct0: profile.ct0,
+      cookieHeader: profile.cookieHeader ?? existing?.cookieHeader,
       createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp
     }
