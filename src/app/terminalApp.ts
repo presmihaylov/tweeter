@@ -1,10 +1,10 @@
-import { createCliRenderer, TextRenderable } from '@opentui/core'
+import { createCliRenderer } from '@opentui/core'
 import type { AuthStatus } from '../twitter/types.ts'
 import { TwitterClient } from '../twitter/client.ts'
 import type { BirdTuiConfig, BirdTuiProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
 import { initialAppState, mergeConversationPage, mergeTimelinePage, selectRelativeTweet, type AppState, type FeedId } from '../state/store.ts'
-import { renderApp } from './renderText.ts'
+import { createMainScreen } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
 
@@ -24,18 +24,16 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     targetFps: 30,
     clearOnShutdown: true
   })
-  const rootText = new TextRenderable(renderer, { id: 'bird-root', content: '', width: '100%', height: '100%' })
-  renderer.root.add(rootText)
   renderer.start()
 
   const startAuthenticated = async (config: BirdTuiConfig, profileName: string, profile: BirdTuiProfile): Promise<void> => {
     let state: AppState = initialAppState()
     const session: { auth?: AuthStatus } = {}
+    const screen = createMainScreen(renderer)
     const client = new TwitterClient({ authToken: profile.authToken, ct0: profile.ct0 })
 
     const rerender = (): void => {
-      rootText.content = renderApp(state, session.auth)
-      renderer.requestRender()
+      screen.render(state, session.auth)
     }
 
     const loadFeed = async (feed: FeedId): Promise<void> => {
@@ -152,7 +150,6 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
   }
 
   const startOnboarding = (): void => {
-    rootText.visible = false
     const screen = createOnboardingScreen(renderer, async (credentials) => {
       try {
         const config = await new ConfigStore().upsertProfile(credentials.profileName, {
@@ -164,7 +161,6 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
           ct0: credentials.ct0
         }
         screen.destroy()
-        rootText.visible = true
         await startAuthenticated(config, credentials.profileName, savedProfile)
       } catch (error) {
         screen.setError(errorMessage(error))
