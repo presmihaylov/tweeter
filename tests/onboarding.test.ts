@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { appendOnboardingText, backspaceOnboardingField, initialOnboardingForm, maskSecret, nextOnboardingField, renderOnboardingForm, validateOnboardingForm } from '../src/auth/onboardingForm.ts'
+import { appendOnboardingText, backspaceOnboardingField, initialOnboardingForm, maskSecret, nextOnboardingField, validateOnboardingForm } from '../src/auth/onboardingForm.ts'
 
 describe('onboarding form', () => {
   test('edits fields and validates credentials', () => {
@@ -18,7 +18,7 @@ describe('onboarding form', () => {
     }
   })
 
-  test('moves focus, backspaces, masks secrets, renders OK button', () => {
+  test('moves focus, backspaces, masks secrets', () => {
     let state = initialOnboardingForm()
     state = nextOnboardingField(state)
     state = appendOnboardingText(state, 'abcdefghi')
@@ -27,7 +27,6 @@ describe('onboarding form', () => {
     expect(maskSecret(state.authToken)).toBe('abc••fgh')
     state = nextOnboardingField(nextOnboardingField(state))
     expect(state.focus).toBe('ok')
-    expect(renderOnboardingForm(state)).toContain('[  OK  ]')
   })
 
   test('requires auth token and ct0', () => {

@@ -6,7 +6,7 @@ import { ConfigStore } from '../config/store.ts'
 import { initialAppState, mergeConversationPage, mergeTimelinePage, selectRelativeTweet, type AppState, type FeedId } from '../state/store.ts'
 import { renderApp } from './renderText.ts'
 import { errorMessage } from '../utils/result.ts'
-import { appendOnboardingText, backspaceOnboardingField, initialOnboardingForm, nextOnboardingField, renderOnboardingForm, validateOnboardingForm, type OnboardingFormState } from '../auth/onboardingForm.ts'
+import { createOnboardingScreen } from './onboardingScreen.ts'
 
 export type TerminalAppOptions = {
   config: BirdTuiConfig
@@ -152,74 +152,24 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
   }
 
   const startOnboarding = (): void => {
-    let form: OnboardingFormState = initialOnboardingForm()
-
-    const rerender = (): void => {
-      rootText.content = renderOnboardingForm(form)
-      renderer.requestRender()
-    }
-
-    const submit = async (): Promise<void> => {
-      const validated = validateOnboardingForm(form)
-      if ('error' in validated) {
-        form = { ...form, error: validated.error, focus: validated.focus }
-        rerender()
-        return
-      }
-      form = { ...form, saving: true, error: undefined }
-      rerender()
+    rootText.visible = false
+    const screen = createOnboardingScreen(renderer, async (credentials) => {
       try {
-        const config = await new ConfigStore().upsertProfile(validated.profileName, {
-          authToken: validated.authToken,
-          ct0: validated.ct0
+        const config = await new ConfigStore().upsertProfile(credentials.profileName, {
+          authToken: credentials.authToken,
+          ct0: credentials.ct0
         })
-        renderer.keyInput.off('keypress', onKeypress)
-        renderer.keyInput.off('paste', onPaste)
-        await startAuthenticated(config, validated.profileName, config.profiles[validated.profileName] ?? { authToken: validated.authToken, ct0: validated.ct0 })
-      } catch (error) {
-        form = { ...form, saving: false, error: errorMessage(error) }
-        rerender()
-      }
-    }
-
-    const onKeypress = (key: Parameters<typeof renderer.keyInput.on<'keypress'>>[1] extends (arg: infer T) => void ? T : never): void => {
-      if (key.name === 'q' || key.name === 'escape') {
-        renderer.destroy()
-        return
-      }
-      if (key.name === 'tab') {
-        form = nextOnboardingField(form, key.shift ? -1 : 1)
-        rerender()
-        return
-      }
-      if (key.name === 'enter') {
-        if (form.focus === 'ok') {
-          void submit()
-          return
+        const savedProfile = config.profiles[credentials.profileName] ?? {
+          authToken: credentials.authToken,
+          ct0: credentials.ct0
         }
-        form = nextOnboardingField(form, 1)
-        rerender()
-        return
+        screen.destroy()
+        rootText.visible = true
+        await startAuthenticated(config, credentials.profileName, savedProfile)
+      } catch (error) {
+        screen.setError(errorMessage(error))
       }
-      if (key.name === 'backspace') {
-        form = backspaceOnboardingField(form)
-        rerender()
-        return
-      }
-      if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.meta) {
-        form = appendOnboardingText(form, key.sequence)
-        rerender()
-      }
-    }
-
-    const onPaste = (event: Parameters<typeof renderer.keyInput.on<'paste'>>[1] extends (arg: infer T) => void ? T : never): void => {
-      form = appendOnboardingText(form, Buffer.from(event.bytes).toString('utf8'))
-      rerender()
-    }
-
-    renderer.keyInput.on('keypress', onKeypress)
-    renderer.keyInput.on('paste', onPaste)
-    rerender()
+    })
   }
 
   if (!opts.profile) {
