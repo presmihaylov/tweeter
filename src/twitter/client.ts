@@ -1,0 +1,241 @@
+import { defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, tweetDetailQueryIdFallbacks } from './constants.ts'
+import { buildArticleFieldToggles, buildHomeTimelineFeatures, buildTweetCreateFeatures, buildTweetDetailFeatures } from './features.ts'
+import { GraphQLClient } from './graphql.ts'
+import { HeaderBuilder } from './headers.ts'
+import { QueryIdStore } from './queryIds.ts'
+import type { AuthStatus, ConversationPage, PostResult, TimelinePage, TweetBundle, TwitterClientOptions } from './types.ts'
+import { extractCursorFromInstructions, getHomeInstructions, getTweetDetailInstructions, parseTweetsFromInstructions } from './extract/index.ts'
+import { getMap, getSlice, getStr, isRecord } from '../utils/guards.ts'
+import { errorMessage } from '../utils/result.ts'
+import type { Fetcher } from '../utils/fetcher.ts'
+import { defaultFetcher } from '../utils/fetcher.ts'
+
+export class TwitterClient {
+  private readonly baseUrl: string
+  private readonly headers: HeaderBuilder
+  private readonly gql: GraphQLClient
+  private readonly queryIds: QueryIdStore
+  private readonly fetchImpl: Fetcher
+
+  constructor(opts: TwitterClientOptions) {
+    this.baseUrl = opts.baseUrl ?? defaultBaseUrl
+    this.fetchImpl = opts.fetch ?? defaultFetcher
+    this.headers = new HeaderBuilder({
+      authToken: opts.authToken,
+      ct0: opts.ct0,
+      userAgent: opts.userAgent ?? defaultUserAgent
+    })
+    this.queryIds = new QueryIdStore(opts.queryIdPath, this.fetchImpl)
+    this.gql = new GraphQLClient(opts.graphQLBase ?? defaultGraphQLBase, this.headers, this.fetchImpl)
+  }
+
+  async checkAuth(): Promise<AuthStatus> {
+    const endpoints = [
+      `${this.baseUrl}/i/api/account/settings.json`,
+      'https://api.twitter.com/1.1/account/settings.json',
+      `${this.baseUrl}/i/api/account/verify_credentials.json?skip_status=true&include_entities=false`,
+      'https://api.twitter.com/1.1/account/verify_credentials.json?skip_status=true&include_entities=false'
+    ]
+    for (const endpoint of endpoints) {
+      try {
+        const response = await this.fetchImpl(endpoint, { method: 'GET', headers: this.headers.jsonHeaders() })
+        if (response.status === 401 || response.status === 403) {
+          return { ok: false, status: response.status, error: 'X cookies rejected; refresh auth_token and ct0' }
+        }
+        if (!response.ok) {
+          continue
+        }
+        const text = await response.text()
+        const parsed = parseCurrentUser(text)
+        if (parsed.ok) {
+          if (parsed.userId) {
+            this.headers.setClientUserId(parsed.userId)
+          }
+          return parsed
+        }
+      } catch {
+        continue
+      }
+    }
+    return { ok: false, error: 'could not verify X credentials' }
+  }
+
+  async loadHomeTimelinePage(args: { count: number; following: boolean; cursor?: string }): Promise<TimelinePage> {
+    const operationName = args.following ? 'HomeLatestTimeline' : 'HomeTimeline'
+    const variables: Record<string, unknown> = {
+      count: args.count,
+      includePromotedContent: true,
+      latestControlAvailable: true,
+      requestContext: args.cursor ? 'scroll' : 'launch',
+      withCommunity: true
+    }
+    if (args.cursor) {
+      variables.cursor = args.cursor
+    }
+    const body = await this.withQueryIdRetry(operationName, [], async (queryId) => {
+      return this.gql.get(operationName, queryId, variables, buildHomeTimelineFeatures())
+    })
+    const instructions = getHomeInstructions(body)
+    return {
+      tweets: parseTweetsFromInstructions(instructions),
+      topCursor: extractCursorFromInstructions(instructions, 'Top'),
+      bottomCursor: extractCursorFromInstructions(instructions, 'Bottom')
+    }
+  }
+
+  async getTweet(tweetId: string): Promise<TweetBundle> {
+    const body = await this.tweetDetailRequest(tweetId)
+    const instructions = getTweetDetailInstructions(body)
+    const tweets = parseTweetsFromInstructions(instructions)
+    const tweet = tweets.find((candidate) => candidate.id === tweetId) ?? tweets[0]
+    if (!tweet) {
+      throw new Error('tweet not found in response')
+    }
+    return { tweet, related: tweets.filter((candidate) => candidate.id !== tweet.id) }
+  }
+
+  async loadRepliesPage(args: { tweetId: string; cursor?: string }): Promise<ConversationPage> {
+    const body = await this.tweetDetailRequest(args.tweetId, args.cursor)
+    const instructions = getTweetDetailInstructions(body)
+    const replies = parseTweetsFromInstructions(instructions).filter((tweet) => tweet.id !== args.tweetId)
+    return {
+      tweetId: args.tweetId,
+      replies,
+      cursor: extractCursorFromInstructions(instructions, 'Bottom')
+    }
+  }
+
+  async reply(args: { tweetId: string; text: string }): Promise<PostResult> {
+    return this.createTweet({ text: args.text, replyToTweetId: args.tweetId })
+  }
+
+  async tweet(text: string): Promise<PostResult> {
+    return this.createTweet({ text })
+  }
+
+  private async tweetDetailRequest(tweetId: string, cursor?: string): Promise<unknown> {
+    const variables: Record<string, unknown> = {
+      focalTweetId: tweetId,
+      rankingMode: 'Relevance',
+      withCommunity: true,
+      includePromotedContent: true,
+      withBirdwatchNotes: true,
+      withQuickPromoteEligibilityTweetFields: true,
+      with_rux_injections: false,
+      withVoice: true
+    }
+    if (cursor) {
+      variables.cursor = cursor
+    }
+    return this.withQueryIdRetry('TweetDetail', [...tweetDetailQueryIdFallbacks], async (queryId) => {
+      return this.gql.getThenPost('TweetDetail', queryId, variables, buildTweetDetailFeatures(), buildArticleFieldToggles())
+    })
+  }
+
+  private async createTweet(args: { text: string; replyToTweetId?: string }): Promise<PostResult> {
+    const media = { media_entities: [], possibly_sensitive: false }
+    const variables: Record<string, unknown> = {
+      tweet_text: args.text,
+      dark_request: false,
+      media,
+      semantic_annotation_ids: []
+    }
+    if (args.replyToTweetId) {
+      variables.reply = { in_reply_to_tweet_id: args.replyToTweetId, exclude_reply_user_ids: [] }
+    }
+    try {
+      const queryId = await this.queryIds.get('CreateTweet')
+      const { body, status } = await this.gql.post('CreateTweet', queryId, variables, buildTweetCreateFeatures())
+      const tweetId = getStr(getMap(getMap(getMap(body, 'data'), 'create_tweet'), 'tweet_results')?.result, 'rest_id')
+      if (tweetId !== '') {
+        return { ok: true, tweetId }
+      }
+      const error = firstError(body)
+      if (error.message !== '') {
+        return { ok: false, error: `CreateTweet failed${error.code ? ` (code ${error.code})` : ''}: ${error.message}`, code: error.code, status }
+      }
+      return { ok: false, error: `CreateTweet returned HTTP ${status} but no tweet ID`, status }
+    } catch (error) {
+      return { ok: false, error: `request error: ${errorMessage(error)}` }
+    }
+  }
+
+  private async withQueryIdRetry(operationName: string, extraFallbacks: string[], call: (queryId: string) => Promise<{ body: unknown; status: number }>): Promise<unknown> {
+    const primary = await this.queryIds.get(operationName)
+    const candidates = [...new Set([primary, ...extraFallbacks].filter((id) => id !== ''))]
+    for (const candidate of candidates) {
+      const { body, status } = await call(candidate)
+      if (status !== 404) {
+        return body
+      }
+    }
+    try {
+      await this.queryIds.refresh(this.baseUrl)
+      const refreshed = await this.queryIds.get(operationName)
+      if (refreshed !== '' && !candidates.includes(refreshed)) {
+        const { body, status } = await call(refreshed)
+        if (status !== 404) {
+          return body
+        }
+      }
+    } catch {
+      // Keep original failure message below.
+    }
+    throw new Error(`all query IDs returned 404 for ${operationName}`)
+  }
+}
+
+const parseCurrentUser = (text: string): AuthStatus => {
+  const asJson = tryParseJson(text)
+  if (isRecord(asJson)) {
+    const username = getStr(asJson, 'screen_name') || getStr(asJson, 'screenName')
+    if (username !== '') {
+      return {
+        ok: true,
+        username,
+        userId: getStr(asJson, 'id_str') || getStr(asJson, 'user_id') || undefined,
+        name: getStr(asJson, 'name') || undefined,
+        source: 'account-api'
+      }
+    }
+  }
+  const screenName = /"screen_name":"([^"]+)"/.exec(text)?.[1]
+  if (screenName) {
+    return {
+      ok: true,
+      username: screenName,
+      userId: /"user_id"\s*:\s*"(\d+)"/.exec(text)?.[1] ?? /"id_str":"(\d+)"/.exec(text)?.[1],
+      name: /"name":"([^"\\]*(?:\\.[^"\\]*)*)"/.exec(text)?.[1],
+      source: 'settings'
+    }
+  }
+  return { ok: false, error: 'no user in response' }
+}
+
+const tryParseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+const firstError = (body: unknown): { message: string; code?: number } => {
+  const top = errorFromList(getSlice(body, 'errors'))
+  if (top.message !== '') {
+    return top
+  }
+  return errorFromList(getSlice(getMap(getMap(body, 'data'), 'create_tweet'), 'errors'))
+}
+
+const errorFromList = (errors: unknown[] | undefined): { message: string; code?: number } => {
+  for (const item of errors ?? []) {
+    const message = getStr(item, 'message')
+    if (message === '') {
+      continue
+    }
+    const code = isRecord(item) && typeof item.code === 'number' ? Math.trunc(item.code) : undefined
+    return { message, code }
+  }
+  return { message: '' }
+}
