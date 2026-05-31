@@ -1,8 +1,5 @@
 import type { AuthStatus } from '../twitter/types.ts'
 import type { AppState } from '../state/store.ts'
-import { onboardingText } from '../auth/onboarding.ts'
-
-export const renderOnboarding = (): string => onboardingText()
 
 export const renderApp = (state: AppState, auth?: AuthStatus): string => {
   const timeline = state.timelines[state.activeFeed]
