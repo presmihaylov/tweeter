@@ -70,6 +70,14 @@ export const createOnboardingScreen = (
     width: '100%'
   })
 
+  const writeHelp = new TextRenderable(renderer, {
+    id: 'onboarding-write-help',
+    content: 'Replies use the official X API. After saving cookies, run: bird auth twitter --client-id <id>',
+    fg: '#f2cc60',
+    height: 1,
+    width: '100%'
+  })
+
   const profileField = createField(renderer, 'profile-field', 'Profile', 'default', false)
   const authField = createField(renderer, 'auth-field', 'auth_token', 'paste auth_token', true)
   const ct0Field = createField(renderer, 'ct0-field', 'ct0', 'paste ct0', true)
@@ -120,6 +128,7 @@ export const createOnboardingScreen = (
   card.add(title)
   card.add(subtitle)
   card.add(help)
+  card.add(writeHelp)
   card.add(profileField.row)
   card.add(authField.row)
   card.add(ct0Field.row)

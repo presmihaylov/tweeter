@@ -33,4 +33,41 @@ describe('config', () => {
     const raw = JSON.parse(await readFile(path, 'utf8')) as { profiles: Record<string, { cookieHeader?: string }> }
     expect(raw.profiles.default?.cookieHeader).toBe('auth_token=auth; ct0=csrf; twid=u%3D1')
   })
+
+  test('setXApiTokens persists OAuth tokens on the profile', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'birdtui-config-'))
+    const path = join(dir, 'config.json')
+    const store = new ConfigStore(path)
+    await store.upsertProfile('default', { authToken: 'auth', ct0: 'csrf' })
+    await store.setXApiTokens('default', {
+      clientId: 'C',
+      accessToken: 'A',
+      refreshToken: 'R',
+      expiresAt: 1_700_000_000_000,
+      scope: 'tweet.write'
+    })
+    const raw = JSON.parse(await readFile(path, 'utf8')) as { profiles: Record<string, { xApi?: { accessToken: string; refreshToken: string } }> }
+    expect(raw.profiles.default?.xApi?.accessToken).toBe('A')
+    expect(raw.profiles.default?.xApi?.refreshToken).toBe('R')
+  })
+
+  test('setXApiTokens throws when profile is missing', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'birdtui-config-'))
+    const path = join(dir, 'config.json')
+    const store = new ConfigStore(path)
+    await expect(store.setXApiTokens('missing', {
+      clientId: 'C', accessToken: 'A', refreshToken: 'R', expiresAt: 1
+    })).rejects.toThrow('profile not found')
+  })
+
+  test('upsertProfile preserves existing xApi tokens', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'birdtui-config-'))
+    const path = join(dir, 'config.json')
+    const store = new ConfigStore(path)
+    await store.upsertProfile('default', { authToken: 'auth', ct0: 'csrf' })
+    await store.setXApiTokens('default', { clientId: 'C', accessToken: 'A', refreshToken: 'R', expiresAt: 1 })
+    await store.upsertProfile('default', { authToken: 'auth2', ct0: 'csrf2' })
+    const raw = JSON.parse(await readFile(path, 'utf8')) as { profiles: Record<string, { xApi?: { accessToken: string } }> }
+    expect(raw.profiles.default?.xApi?.accessToken).toBe('A')
+  })
 })

@@ -1,7 +1,8 @@
 import { createCliRenderer } from '@opentui/core'
-import type { AuthStatus } from '../twitter/types.ts'
+import type { AuthStatus, PostResult } from '../twitter/types.ts'
 import { TwitterClient } from '../twitter/client.ts'
-import type { BirdTuiConfig, BirdTuiProfile } from '../config/schema.ts'
+import { OfficialXApiClient } from '../twitter/officialClient.ts'
+import type { BirdTuiConfig, BirdTuiProfile, XApiTokens } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
 import { initialAppState, mergeConversationPage, mergeTimelinePage, selectRelativeTweet, type AppState, type FeedId } from '../state/store.ts'
 import { createMainScreen } from './mainScreen.ts'
@@ -33,7 +34,8 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     let state: AppState = initialAppState()
     const session: { auth?: AuthStatus } = {}
     const screen = createMainScreen(renderer)
-    const client = new TwitterClient({ authToken: profile.authToken, ct0: profile.ct0, cookieHeader: profile.cookieHeader, debugLogger })
+    const readClient = new TwitterClient({ authToken: profile.authToken, ct0: profile.ct0, cookieHeader: profile.cookieHeader, debugLogger })
+    const writeClient = profile.xApi ? createWriteClient(profile.xApi, profileName) : undefined
 
     const rerender = (): void => {
       screen.render(state, session.auth)
@@ -43,7 +45,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       state = { ...state, activeFeed: feed, timelines: { ...state.timelines, [feed]: { ...state.timelines[feed], loading: true, error: undefined } }, status: 'loading feed' }
       rerender()
       try {
-        const page = await client.loadHomeTimelinePage({ count: 40, following: feed === 'following', cursor: state.timelines[feed].bottomCursor })
+        const page = await readClient.loadHomeTimelinePage({ count: 40, following: feed === 'following', cursor: state.timelines[feed].bottomCursor })
         state = mergeTimelinePage(state, feed, page.tweets, page)
         state = { ...state, status: `loaded ${page.tweets.length} tweets` }
       } catch (error) {
@@ -60,7 +62,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       state = { ...state, status: 'loading replies' }
       rerender()
       try {
-        const page = await client.loadRepliesPage({ tweetId, cursor: state.conversations[tweetId]?.cursor })
+        const page = await readClient.loadRepliesPage({ tweetId, cursor: state.conversations[tweetId]?.cursor })
         state = mergeConversationPage(state, tweetId, page.replies, page.cursor)
         state = { ...state, status: `loaded ${page.replies.length} replies` }
       } catch (error) {
@@ -75,17 +77,23 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       if (!replyToTweetId || text === '') {
         return
       }
+      if (!writeClient) {
+        const message = 'X API not configured; run `bird auth twitter --client-id <id>` to enable replies'
+        state = { ...state, composer: { ...state.composer, sending: false, error: message }, status: message }
+        rerender()
+        return
+      }
       state = { ...state, composer: { ...state.composer, sending: true, error: undefined }, status: 'sending reply' }
       rerender()
       await debugLogger.log('ui.reply.submit', { replyToTweetId, textLength: text.length })
-    const result = await client.reply({ tweetId: replyToTweetId, text })
+      const result: PostResult = await writeClient.reply({ tweetId: replyToTweetId, text })
       if (result.ok) {
         state = { ...state, composer: { open: false, draft: '', sending: false }, status: `sent reply ${result.tweetId}` }
         rerender()
         return
       }
       await debugLogger.log('ui.reply.failed', { replyToTweetId, error: result.error, status: result.status, code: result.code, logPath: debugLogger.path })
-    state = { ...state, composer: { ...state.composer, sending: false, error: `${result.error}\nLog: ${debugLogger.path}` }, status: `reply failed; log: ${debugLogger.path}` }
+      state = { ...state, composer: { ...state.composer, sending: false, error: `${result.error}\nLog: ${debugLogger.path}` }, status: `reply failed; log: ${debugLogger.path}` }
       rerender()
     }
 
@@ -146,12 +154,27 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
 
     state = { ...state, status: `validating ${profileName}` }
     rerender()
-    session.auth = await client.checkAuth()
-    state = { ...state, status: session.auth.ok ? `auth ok @${session.auth.username}` : session.auth.error }
+    session.auth = await readClient.checkAuth()
+    const authText = session.auth.ok ? `auth ok @${session.auth.username}` : session.auth.error
+    const writeText = writeClient ? '' : ' · X API not configured (replies disabled, run `bird auth twitter`)'
+    state = { ...state, status: `${authText}${writeText}` }
     rerender()
     if (session.auth.ok) {
       await loadFeed(config.ui?.defaultFeed === 'forYou' ? 'forYou' : 'following')
     }
+  }
+
+  const createWriteClient = (tokens: XApiTokens, profileName: string): OfficialXApiClient => {
+    return new OfficialXApiClient({
+      tokens,
+      onTokensRefreshed: async (next) => {
+        try {
+          await new ConfigStore().setXApiTokens(profileName, next)
+        } catch (error) {
+          await debugLogger.log('xapi.tokensPersistFailed', { error: errorMessage(error) })
+        }
+      }
+    })
   }
 
   const startOnboarding = (): void => {

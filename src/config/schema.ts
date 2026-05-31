@@ -1,9 +1,20 @@
 import { z } from 'zod'
 
+export const xApiTokensSchema = z.object({
+  clientId: z.string().min(1),
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1),
+  expiresAt: z.number().int().nonnegative(),
+  scope: z.string().optional(),
+  userId: z.string().optional(),
+  username: z.string().optional()
+})
+
 export const profileSchema = z.object({
   authToken: z.string().min(1),
   ct0: z.string().min(1),
   cookieHeader: z.string().optional(),
+  xApi: xApiTokensSchema.optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional()
 })
@@ -19,5 +30,6 @@ export const birdTuiConfigSchema = z.object({
 
 export type BirdTuiConfig = z.infer<typeof birdTuiConfigSchema>
 export type BirdTuiProfile = z.infer<typeof profileSchema>
+export type XApiTokens = z.infer<typeof xApiTokensSchema>
 
 export const emptyConfig = (): BirdTuiConfig => ({ defaultProfile: 'default', profiles: {} })
