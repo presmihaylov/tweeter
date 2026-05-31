@@ -144,8 +144,9 @@ export class TwitterClient {
       variables.reply = { in_reply_to_tweet_id: args.replyToTweetId, exclude_reply_user_ids: [] }
     }
     try {
-      const queryId = await this.queryIds.get('CreateTweet')
-      const { body, status } = await this.gql.post('CreateTweet', queryId, variables, buildTweetCreateFeatures())
+      const { body, status } = await this.withQueryIdRetryResponse('CreateTweet', [], async (queryId) => {
+        return this.gql.post('CreateTweet', queryId, variables, buildTweetCreateFeatures())
+      })
       const tweetId = getStr(getMap(getMap(getMap(body, 'data'), 'create_tweet'), 'tweet_results')?.result, 'rest_id')
       if (tweetId !== '') {
         return { ok: true, tweetId }
@@ -154,6 +155,9 @@ export class TwitterClient {
       if (error.message !== '') {
         return { ok: false, error: `CreateTweet failed${error.code ? ` (code ${error.code})` : ''}: ${error.message}`, code: error.code, status }
       }
+      if (status === 401 || status === 403) {
+        return { ok: false, error: 'CreateTweet failed: X rejected the saved cookies; refresh auth_token and ct0', status }
+      }
       return { ok: false, error: `CreateTweet returned HTTP ${status} but no tweet ID`, status }
     } catch (error) {
       return { ok: false, error: `request error: ${errorMessage(error)}` }
@@ -161,12 +165,17 @@ export class TwitterClient {
   }
 
   private async withQueryIdRetry(operationName: string, extraFallbacks: string[], call: (queryId: string) => Promise<{ body: unknown; status: number }>): Promise<unknown> {
+    const response = await this.withQueryIdRetryResponse(operationName, extraFallbacks, call)
+    return response.body
+  }
+
+  private async withQueryIdRetryResponse(operationName: string, extraFallbacks: string[], call: (queryId: string) => Promise<{ body: unknown; status: number }>): Promise<{ body: unknown; status: number }> {
     const primary = await this.queryIds.get(operationName)
     const candidates = [...new Set([primary, ...extraFallbacks].filter((id) => id !== ''))]
     for (const candidate of candidates) {
       const { body, status } = await call(candidate)
       if (status !== 404) {
-        return body
+        return { body, status }
       }
     }
     try {
@@ -175,7 +184,7 @@ export class TwitterClient {
       if (refreshed !== '' && !candidates.includes(refreshed)) {
         const { body, status } = await call(refreshed)
         if (status !== 404) {
-          return body
+          return { body, status }
         }
       }
     } catch {

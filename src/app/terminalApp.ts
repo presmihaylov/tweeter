@@ -96,7 +96,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         return
       }
       if (state.composer.open) {
-        if (isCtrlEnterKey(key)) {
+        if (isCtrlEnterKey(key) || isEnterKey(key)) {
           void sendComposer()
           return
         }

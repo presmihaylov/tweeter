@@ -327,8 +327,8 @@ export const createMainScreen = (renderer: CliRenderer): MainScreen => {
         return reply ? `@${reply.author.handle}: ${reply.text.replaceAll('\n', ' ')}` : ''
       }).filter(Boolean).join('\n\n') : 'Press Enter to load replies.'
       composer.visible = state.composer.open
-      composerTitle.content = `Replying to ${state.composer.replyToTweetId ?? 'tweet'} · Ctrl+Enter send · Esc close`
-      composerText.content = state.composer.draft || 'Start typing…'
+      composerTitle.content = `Replying to ${state.composer.replyToTweetId ?? 'tweet'} · Enter/Ctrl+Enter send · Esc close`
+      composerText.content = state.composer.error ? `${state.composer.draft || 'Start typing…'}\n\nError: ${state.composer.error}` : state.composer.draft || 'Start typing…'
       statusText.content = state.status
       statusText.fg = state.status.includes('error') || state.status.includes('failed') ? '#ff7b72' : '#7d8590'
       renderCards(state)

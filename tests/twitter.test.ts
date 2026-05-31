@@ -80,4 +80,32 @@ describe('TwitterClient mocked e2e', () => {
       expect(posted.tweetId).toBe('99')
     }
   })
+
+  test('posting refreshes stale CreateTweet query id', async () => {
+    let createAttempts = 0
+    const fetchMock = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = input.toString()
+      if (url === 'https://x.com') {
+        return textResponse('<script src="/bundle.js"></script>')
+      }
+      if (url === 'https://x.com/bundle.js') {
+        return textResponse('operationName:"CreateTweet",queryId:"freshCreate123"')
+      }
+      if (url.includes('CreateTweet')) {
+        createAttempts += 1
+        if (!url.includes('freshCreate123')) {
+          return jsonResponse({}, { status: 404 })
+        }
+        return jsonResponse({ data: { create_tweet: { tweet_results: { result: { rest_id: '100' } } } } })
+      }
+      return jsonResponse({})
+    }
+    const client = new TwitterClient({ authToken: 'auth', ct0: 'csrf', fetch: fetchMock, graphQLBase: 'https://x.com/i/api/graphql' })
+    const posted = await client.reply({ tweetId: '10', text: 'retry' })
+    expect(posted.ok).toBe(true)
+    expect(createAttempts).toBe(2)
+    if (posted.ok) {
+      expect(posted.tweetId).toBe('100')
+    }
+  })
 })
