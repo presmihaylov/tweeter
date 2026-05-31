@@ -1,5 +1,6 @@
 import { BoxRenderable, InputRenderable, TextRenderable, type CliRenderer } from '@opentui/core'
 import { initialOnboardingForm, validateOnboardingForm, type OnboardingCredentials, type OnboardingField, type OnboardingFormState } from '../auth/onboardingForm.ts'
+import { isEnterKey } from './keyEvents.ts'
 
 export type OnboardingScreen = {
   destroy(): void
@@ -182,7 +183,7 @@ export const createOnboardingScreen = (
       moveFocus(key.shift ? -1 : 1)
       return
     }
-    if (key.name === 'enter' && state.focus === 'ok') {
+    if (isEnterKey({ ...key, ctrl: false }) && state.focus === 'ok') {
       void submit()
     }
   }

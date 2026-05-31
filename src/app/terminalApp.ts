@@ -7,6 +7,7 @@ import { initialAppState, mergeConversationPage, mergeTimelinePage, selectRelati
 import { createMainScreen } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
+import { isCtrlEnterKey, isEnterKey } from './keyEvents.ts'
 
 export type TerminalAppOptions = {
   config: BirdTuiConfig
@@ -95,7 +96,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         return
       }
       if (state.composer.open) {
-        if (key.ctrl && key.name === 'enter') {
+        if (isCtrlEnterKey(key)) {
           void sendComposer()
           return
         }
@@ -130,7 +131,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         rerender()
         return
       }
-      if (key.name === 'enter') {
+      if (isEnterKey(key)) {
         void loadReplies()
         return
       }
