@@ -4,13 +4,11 @@ export const defaultGraphQLBase = 'https://x.com/i/api/graphql'
 export const defaultUserAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36'
 
 export const fallbackQueryIds: Readonly<Record<string, string>> = {
-  CreateTweet: 'H-t2v_HvFR07ZBP9aOeKoA',
   TweetDetail: '97JF30KziU00483E_8elBA',
   HomeTimeline: 'edseUwk9sP5Phz__9TIRnA',
   HomeLatestTimeline: 'iOEZpOdfekFsxSlPQCQtPg',
   UserByScreenName: 'xc8f1g7BYqr6VTzTbvNlGw'
 }
 
-export const createTweetQueryId = 'H-t2v_HvFR07ZBP9aOeKoA'
 export const tweetDetailQueryIdFallbacks = ['97JF30KziU00483E_8elBA', 'aFvUsJm2c-oDkJV75blV6g'] as const
 export const targetOperations = Object.keys(fallbackQueryIds)

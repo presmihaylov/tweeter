@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import type { BirdTuiConfig, BirdTuiProfile } from './schema.ts'
+import type { BirdTuiConfig, BirdTuiProfile, XApiTokens } from './schema.ts'
 import { birdTuiConfigSchema, emptyConfig } from './schema.ts'
 import { configPath } from './paths.ts'
 import { importBirdgoConfig } from './birdgoImport.ts'
@@ -38,12 +38,32 @@ export class ConfigStore {
       authToken: profile.authToken,
       ct0: profile.ct0,
       cookieHeader: profile.cookieHeader ?? existing?.cookieHeader,
+      xApi: existing?.xApi,
       createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp
     }
     const next: BirdTuiConfig = {
       ...cfg,
       defaultProfile: cfg.defaultProfile && cfg.profiles[cfg.defaultProfile] ? cfg.defaultProfile : name,
+      profiles: { ...cfg.profiles, [name]: nextProfile }
+    }
+    await this.save(next)
+    return next
+  }
+
+  async setXApiTokens(name: string, tokens: XApiTokens): Promise<BirdTuiConfig> {
+    const cfg = await this.load()
+    const existing = cfg.profiles[name]
+    if (!existing) {
+      throw new Error(`profile not found: ${name}`)
+    }
+    const nextProfile: BirdTuiProfile = {
+      ...existing,
+      xApi: tokens,
+      updatedAt: nowIso()
+    }
+    const next: BirdTuiConfig = {
+      ...cfg,
       profiles: { ...cfg.profiles, [name]: nextProfile }
     }
     await this.save(next)
