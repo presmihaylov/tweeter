@@ -6,6 +6,7 @@ import { ConfigStore } from '../config/store.ts'
 import { initialAppState, mergeConversationPage, mergeTimelinePage, selectRelativeTweet, type AppState, type FeedId } from '../state/store.ts'
 import { createMainScreen } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
+import { createDebugLogger } from '../utils/debugLog.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
 import { isCtrlEnterKey, isEnterKey } from './keyEvents.ts'
 
@@ -26,12 +27,13 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     clearOnShutdown: true
   })
   renderer.start()
+  const debugLogger = createDebugLogger(opts.debugLog)
 
   const startAuthenticated = async (config: BirdTuiConfig, profileName: string, profile: BirdTuiProfile): Promise<void> => {
     let state: AppState = initialAppState()
     const session: { auth?: AuthStatus } = {}
     const screen = createMainScreen(renderer)
-    const client = new TwitterClient({ authToken: profile.authToken, ct0: profile.ct0 })
+    const client = new TwitterClient({ authToken: profile.authToken, ct0: profile.ct0, debugLogger })
 
     const rerender = (): void => {
       screen.render(state, session.auth)
@@ -75,13 +77,15 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
       state = { ...state, composer: { ...state.composer, sending: true, error: undefined }, status: 'sending reply' }
       rerender()
-      const result = await client.reply({ tweetId: replyToTweetId, text })
+      await debugLogger.log('ui.reply.submit', { replyToTweetId, textLength: text.length })
+    const result = await client.reply({ tweetId: replyToTweetId, text })
       if (result.ok) {
         state = { ...state, composer: { open: false, draft: '', sending: false }, status: `sent reply ${result.tweetId}` }
         rerender()
         return
       }
-      state = { ...state, composer: { ...state.composer, sending: false, error: result.error }, status: 'reply failed' }
+      await debugLogger.log('ui.reply.failed', { replyToTweetId, error: result.error, status: result.status, code: result.code, logPath: debugLogger.path })
+    state = { ...state, composer: { ...state.composer, sending: false, error: `${result.error}\nLog: ${debugLogger.path}` }, status: `reply failed; log: ${debugLogger.path}` }
       rerender()
     }
 

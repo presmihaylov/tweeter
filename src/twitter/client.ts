@@ -9,6 +9,8 @@ import { getMap, getSlice, getStr, isRecord } from '../utils/guards.ts'
 import { errorMessage } from '../utils/result.ts'
 import type { Fetcher } from '../utils/fetcher.ts'
 import { defaultFetcher } from '../utils/fetcher.ts'
+import type { DebugLogger } from '../utils/debugLog.ts'
+import { safeJsonSnippet } from '../utils/debugLog.ts'
 
 export class TwitterClient {
   private readonly baseUrl: string
@@ -16,10 +18,12 @@ export class TwitterClient {
   private readonly gql: GraphQLClient
   private readonly queryIds: QueryIdStore
   private readonly fetchImpl: Fetcher
+  private readonly debugLogger?: DebugLogger
 
   constructor(opts: TwitterClientOptions) {
     this.baseUrl = opts.baseUrl ?? defaultBaseUrl
     this.fetchImpl = opts.fetch ?? defaultFetcher
+    this.debugLogger = opts.debugLogger
     this.headers = new HeaderBuilder({
       authToken: opts.authToken,
       ct0: opts.ct0,
@@ -144,8 +148,18 @@ export class TwitterClient {
       variables.reply = { in_reply_to_tweet_id: args.replyToTweetId, exclude_reply_user_ids: [] }
     }
     try {
-      const { body, status } = await this.withQueryIdRetryResponse('CreateTweet', [], async (queryId) => {
-        return this.gql.post('CreateTweet', queryId, variables, buildTweetCreateFeatures())
+      await this.logDebug('reply.createTweet.start', {
+        isReply: Boolean(args.replyToTweetId),
+        replyToTweetId: args.replyToTweetId,
+        textLength: args.text.length
+      })
+      const { body, status, queryId } = await this.withQueryIdRetryResponse('CreateTweet', [], async (candidateQueryId) => {
+        return this.gql.post('CreateTweet', candidateQueryId, variables, buildTweetCreateFeatures())
+      })
+      await this.logDebug('reply.createTweet.response', {
+        status,
+        queryId,
+        body: safeJsonSnippet(body)
       })
       const tweetId = getStr(getMap(getMap(getMap(body, 'data'), 'create_tweet'), 'tweet_results')?.result, 'rest_id')
       if (tweetId !== '') {
@@ -153,14 +167,22 @@ export class TwitterClient {
       }
       const error = firstError(body)
       if (error.message !== '') {
-        return { ok: false, error: `CreateTweet failed${error.code ? ` (code ${error.code})` : ''}: ${error.message}`, code: error.code, status }
+        const message = `CreateTweet failed${error.code ? ` (code ${error.code})` : ''}: ${error.message}`
+        await this.logDebug('reply.createTweet.failure', { status, queryId, message, body: safeJsonSnippet(body) })
+        return { ok: false, error: message, code: error.code, status }
       }
       if (status === 401 || status === 403) {
-        return { ok: false, error: 'CreateTweet failed: X rejected the saved cookies; refresh auth_token and ct0', status }
+        const message = 'CreateTweet failed: X rejected the saved cookies; refresh auth_token and ct0'
+        await this.logDebug('reply.createTweet.failure', { status, queryId, message, body: safeJsonSnippet(body) })
+        return { ok: false, error: message, status }
       }
-      return { ok: false, error: `CreateTweet returned HTTP ${status} but no tweet ID`, status }
+      const message = `CreateTweet returned HTTP ${status} but no tweet ID; body=${safeJsonSnippet(body, 500)}`
+      await this.logDebug('reply.createTweet.failure', { status, queryId, message, body: safeJsonSnippet(body) })
+      return { ok: false, error: message, status }
     } catch (error) {
-      return { ok: false, error: `request error: ${errorMessage(error)}` }
+      const message = `request error: ${errorMessage(error)}`
+      await this.logDebug('reply.createTweet.exception', { message })
+      return { ok: false, error: message }
     }
   }
 
@@ -169,13 +191,13 @@ export class TwitterClient {
     return response.body
   }
 
-  private async withQueryIdRetryResponse(operationName: string, extraFallbacks: string[], call: (queryId: string) => Promise<{ body: unknown; status: number }>): Promise<{ body: unknown; status: number }> {
+  private async withQueryIdRetryResponse(operationName: string, extraFallbacks: string[], call: (queryId: string) => Promise<{ body: unknown; status: number }>): Promise<{ body: unknown; status: number; queryId: string }> {
     const primary = await this.queryIds.get(operationName)
     const candidates = [...new Set([primary, ...extraFallbacks].filter((id) => id !== ''))]
     for (const candidate of candidates) {
       const { body, status } = await call(candidate)
       if (status !== 404) {
-        return { body, status }
+        return { body, status, queryId: candidate }
       }
     }
     try {
@@ -184,13 +206,21 @@ export class TwitterClient {
       if (refreshed !== '' && !candidates.includes(refreshed)) {
         const { body, status } = await call(refreshed)
         if (status !== 404) {
-          return { body, status }
+          return { body, status, queryId: refreshed }
         }
       }
     } catch {
       // Keep original failure message below.
     }
     throw new Error(`all query IDs returned 404 for ${operationName}`)
+  }
+
+  private async logDebug(event: string, data?: Record<string, unknown>): Promise<void> {
+    try {
+      await this.debugLogger?.log(event, data)
+    } catch {
+      // Debug logging must never break user actions.
+    }
   }
 }
 

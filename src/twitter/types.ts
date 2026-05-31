@@ -1,4 +1,5 @@
 import type { Fetcher } from '../utils/fetcher.ts'
+import type { DebugLogger } from '../utils/debugLog.ts'
 
 export type AuthStatus =
   | { ok: true; username: string; userId?: string; name?: string; source: string }
@@ -53,4 +54,5 @@ export type TwitterClientOptions = {
   timeoutMs?: number
   fetch?: Fetcher
   queryIdPath?: string
+  debugLogger?: DebugLogger
 }
