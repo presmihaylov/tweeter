@@ -3,6 +3,7 @@ import { z } from 'zod'
 export const profileSchema = z.object({
   authToken: z.string().min(1),
   ct0: z.string().min(1),
+  cookieHeader: z.string().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional()
 })

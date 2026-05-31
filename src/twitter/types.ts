@@ -48,6 +48,7 @@ export type PostResult =
 export type TwitterClientOptions = {
   authToken: string
   ct0: string
+  cookieHeader?: string
   baseUrl?: string
   graphQLBase?: string
   userAgent?: string

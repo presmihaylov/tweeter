@@ -8,6 +8,7 @@ export type HeaderOptions = {
   clientUuid?: string
   clientDeviceId?: string
   clientUserId?: string
+  cookieHeader?: string
 }
 
 export class HeaderBuilder {
@@ -26,7 +27,7 @@ export class HeaderBuilder {
   }
 
   cookieHeader(): string {
-    return `auth_token=${this.opts.authToken}; ct0=${this.opts.ct0}`
+    return this.opts.cookieHeader ?? `auth_token=${this.opts.authToken}; ct0=${this.opts.ct0}`
   }
 
   baseHeaders(options: { authType?: 'OAuth2Session' | 'OAuth2Client'; origin?: string; referer?: string } = {}): HeadersInit {
@@ -40,7 +41,7 @@ export class HeaderBuilder {
       'x-twitter-client-language': 'en',
       'x-client-uuid': this.clientUuid,
       'x-twitter-client-deviceid': this.clientDeviceId,
-      'x-client-transaction-id': randomBytes(16).toString('hex'),
+      'x-client-transaction-id': randomBytes(64).toString('base64'),
       cookie: this.cookieHeader(),
       'user-agent': this.opts.userAgent ?? defaultUserAgent,
       origin: options.origin ?? 'https://x.com',

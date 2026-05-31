@@ -28,7 +28,8 @@ export class TwitterClient {
     this.headers = new HeaderBuilder({
       authToken: opts.authToken,
       ct0: opts.ct0,
-      userAgent: opts.userAgent ?? defaultUserAgent
+      userAgent: opts.userAgent ?? defaultUserAgent,
+      cookieHeader: opts.cookieHeader
     })
     this.queryIds = new QueryIdStore(opts.queryIdPath, this.fetchImpl)
     this.gql = new GraphQLClient(opts.graphQLBase ?? defaultGraphQLBase, this.headers, this.fetchImpl)
@@ -143,11 +144,14 @@ export class TwitterClient {
     const variables: Record<string, unknown> = {
       tweet_text: args.text,
       dark_request: false,
+      batch_compose: 'BatchSubsequent',
       media,
-      semantic_annotation_ids: []
+      semantic_annotation_ids: [],
+      disallowed_reply_options: null,
+      semantic_annotation_options: { source: 'Profile' }
     }
     if (args.replyToTweetId) {
-      variables.reply = { in_reply_to_tweet_id: args.replyToTweetId }
+      variables.reply = { in_reply_to_tweet_id: args.replyToTweetId, exclude_reply_user_ids: [] }
     }
     try {
       await this.logDebug('reply.createTweet.start', {
@@ -269,21 +273,29 @@ export class TwitterClient {
 }
 
 const createTweetHeaderStrategies = (headers: HeaderBuilder): Array<{ name: string; headers: HeadersInit }> => {
-  const base = headers.jsonHeaders({ origin: 'https://twitter.com', referer: 'https://twitter.com/' }) as Record<string, string>
+  const xWeb = {
+    ...headers.jsonHeaders({ authType: 'OAuth2Session', origin: 'https://x.com', referer: 'https://x.com/compose/post' }),
+    'accept-language': 'en-GB,en;q=0.5',
+    priority: 'u=1, i',
+    'sec-ch-ua': '"Chromium";v="146", "Not-A.Brand";v="24", "Brave";v="146"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"macOS"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    'sec-gpc': '1'
+  }
   const minimal: Record<string, string> = {}
-  for (const key of ['accept', 'accept-language', 'authorization', 'cookie', 'content-type', 'user-agent', 'x-csrf-token']) {
-    const value = base[key]
+  for (const key of ['accept', 'accept-language', 'authorization', 'cookie', 'content-type', 'origin', 'referer', 'user-agent', 'x-client-transaction-id', 'x-csrf-token', 'x-twitter-active-user', 'x-twitter-auth-type', 'x-twitter-client-language']) {
+    const value = (xWeb as Record<string, string>)[key]
     if (value) {
       minimal[key] = value
     }
   }
-  minimal.origin = 'https://twitter.com'
-  minimal.referer = 'https://twitter.com/'
 
   return [
-    { name: 'browser-minimal', headers: minimal },
-    { name: 'oauth2-client', headers: headers.jsonHeaders({ authType: 'OAuth2Client', origin: 'https://twitter.com', referer: 'https://twitter.com/' }) },
-    { name: 'oauth2-session', headers: base }
+    { name: 'x-web-curl-shape', headers: xWeb },
+    { name: 'x-web-minimal', headers: minimal }
   ]
 }
 

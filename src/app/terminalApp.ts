@@ -33,7 +33,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     let state: AppState = initialAppState()
     const session: { auth?: AuthStatus } = {}
     const screen = createMainScreen(renderer)
-    const client = new TwitterClient({ authToken: profile.authToken, ct0: profile.ct0, debugLogger })
+    const client = new TwitterClient({ authToken: profile.authToken, ct0: profile.ct0, cookieHeader: profile.cookieHeader, debugLogger })
 
     const rerender = (): void => {
       screen.render(state, session.auth)
