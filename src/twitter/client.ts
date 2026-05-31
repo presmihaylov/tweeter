@@ -1,4 +1,4 @@
-import { defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, tweetDetailQueryIdFallbacks } from './constants.ts'
+import { createTweetQueryId, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, tweetDetailQueryIdFallbacks } from './constants.ts'
 import { buildArticleFieldToggles, buildHomeTimelineFeatures, buildTweetCreateFeatures, buildTweetDetailFeatures } from './features.ts'
 import { GraphQLClient } from './graphql.ts'
 import { HeaderBuilder } from './headers.ts'
@@ -16,6 +16,7 @@ export class TwitterClient {
   private readonly baseUrl: string
   private readonly headers: HeaderBuilder
   private readonly gql: GraphQLClient
+  private readonly createTweetGql: GraphQLClient
   private readonly queryIds: QueryIdStore
   private readonly fetchImpl: Fetcher
   private readonly debugLogger?: DebugLogger
@@ -31,6 +32,7 @@ export class TwitterClient {
     })
     this.queryIds = new QueryIdStore(opts.queryIdPath, this.fetchImpl)
     this.gql = new GraphQLClient(opts.graphQLBase ?? defaultGraphQLBase, this.headers, this.fetchImpl)
+    this.createTweetGql = new GraphQLClient('https://twitter.com/i/api/graphql', this.headers, this.fetchImpl)
   }
 
   async checkAuth(): Promise<AuthStatus> {
@@ -145,7 +147,7 @@ export class TwitterClient {
       semantic_annotation_ids: []
     }
     if (args.replyToTweetId) {
-      variables.reply = { in_reply_to_tweet_id: args.replyToTweetId, exclude_reply_user_ids: [] }
+      variables.reply = { in_reply_to_tweet_id: args.replyToTweetId }
     }
     try {
       await this.logDebug('reply.createTweet.start', {
@@ -153,8 +155,15 @@ export class TwitterClient {
         replyToTweetId: args.replyToTweetId,
         textLength: args.text.length
       })
-      const { body, status, queryId } = await this.withQueryIdRetryResponse('CreateTweet', [], async (candidateQueryId) => {
-        return this.gql.post('CreateTweet', candidateQueryId, variables, buildTweetCreateFeatures())
+      const { body, status, queryId } = await this.withCreateTweetQueryIdRetry(async (candidateQueryId) => {
+        return this.createTweetGql.post(
+          'CreateTweet',
+          candidateQueryId,
+          variables,
+          buildTweetCreateFeatures(),
+          {},
+          this.headers.jsonHeaders({ authType: 'OAuth2Client', origin: 'https://twitter.com', referer: 'https://twitter.com/' })
+        )
       })
       await this.logDebug('reply.createTweet.response', {
         status,
@@ -184,6 +193,32 @@ export class TwitterClient {
       await this.logDebug('reply.createTweet.exception', { message })
       return { ok: false, error: message }
     }
+  }
+
+  private async withCreateTweetQueryIdRetry(call: (queryId: string) => Promise<{ body: unknown; status: number }>): Promise<{ body: unknown; status: number; queryId: string }> {
+    const cached = await this.queryIds.get('CreateTweet')
+    const candidates = [...new Set([createTweetQueryId, cached].filter((id) => id !== ''))]
+    for (const candidate of candidates) {
+      const { body, status } = await call(candidate)
+      await this.logDebug('reply.createTweet.queryIdAttempt', { queryId: candidate, status })
+      if (status !== 404) {
+        return { body, status, queryId: candidate }
+      }
+    }
+    try {
+      await this.queryIds.refresh(this.baseUrl)
+      const refreshed = await this.queryIds.get('CreateTweet')
+      if (refreshed !== '' && !candidates.includes(refreshed)) {
+        const { body, status } = await call(refreshed)
+        await this.logDebug('reply.createTweet.queryIdAttempt', { queryId: refreshed, status })
+        if (status !== 404) {
+          return { body, status, queryId: refreshed }
+        }
+      }
+    } catch {
+      // Keep original failure message below.
+    }
+    throw new Error('all query IDs returned 404 for CreateTweet')
   }
 
   private async withQueryIdRetry(operationName: string, extraFallbacks: string[], call: (queryId: string) => Promise<{ body: unknown; status: number }>): Promise<unknown> {

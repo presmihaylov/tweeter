@@ -29,13 +29,13 @@ export class HeaderBuilder {
     return `auth_token=${this.opts.authToken}; ct0=${this.opts.ct0}`
   }
 
-  baseHeaders(): HeadersInit {
+  baseHeaders(options: { authType?: 'OAuth2Session' | 'OAuth2Client'; origin?: string; referer?: string } = {}): HeadersInit {
     const headers: Record<string, string> = {
       accept: '*/*',
       'accept-language': 'en-US,en;q=0.9',
       authorization: `Bearer ${bearerToken}`,
       'x-csrf-token': this.opts.ct0,
-      'x-twitter-auth-type': 'OAuth2Session',
+      'x-twitter-auth-type': options.authType ?? 'OAuth2Session',
       'x-twitter-active-user': 'yes',
       'x-twitter-client-language': 'en',
       'x-client-uuid': this.clientUuid,
@@ -43,8 +43,8 @@ export class HeaderBuilder {
       'x-client-transaction-id': randomBytes(16).toString('hex'),
       cookie: this.cookieHeader(),
       'user-agent': this.opts.userAgent ?? defaultUserAgent,
-      origin: 'https://x.com',
-      referer: 'https://x.com/'
+      origin: options.origin ?? 'https://x.com',
+      referer: options.referer ?? 'https://x.com/'
     }
     if (this.clientUserId) {
       headers['x-twitter-client-user-id'] = this.clientUserId
@@ -52,7 +52,7 @@ export class HeaderBuilder {
     return headers
   }
 
-  jsonHeaders(): HeadersInit {
-    return { ...this.baseHeaders(), 'content-type': 'application/json' }
+  jsonHeaders(options: { authType?: 'OAuth2Session' | 'OAuth2Client'; origin?: string; referer?: string } = {}): HeadersInit {
+    return { ...this.baseHeaders(options), 'content-type': 'application/json' }
   }
 }

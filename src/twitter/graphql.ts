@@ -26,11 +26,15 @@ export class GraphQLClient {
     return { body: await parseJson(response), status: response.status }
   }
 
-  async post(operationName: string, queryId: string, variables: GraphQLPayload, features: FeatureMap): Promise<{ body: unknown; status: number }> {
+  async post(operationName: string, queryId: string, variables: GraphQLPayload, features: FeatureMap, fieldToggles?: FeatureMap, headers?: HeadersInit): Promise<{ body: unknown; status: number }> {
+    const payload: Record<string, unknown> = { variables, features, queryId }
+    if (fieldToggles) {
+      payload.fieldToggles = fieldToggles
+    }
     const response = await this.fetchImpl(`${this.graphQLBase}/${queryId}/${operationName}`, {
       method: 'POST',
-      headers: this.headers.jsonHeaders(),
-      body: JSON.stringify({ variables, features, queryId })
+      headers: headers ?? this.headers.jsonHeaders(),
+      body: JSON.stringify(payload)
     })
     return { body: await parseJson(response), status: response.status }
   }

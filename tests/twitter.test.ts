@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { HeaderBuilder } from '../src/twitter/headers.ts'
 import { extractMedia } from '../src/twitter/extract/media.ts'
 import { parseTweetsFromInstructions } from '../src/twitter/extract/tweet.ts'
@@ -100,7 +103,8 @@ describe('TwitterClient mocked e2e', () => {
       }
       return jsonResponse({})
     }
-    const client = new TwitterClient({ authToken: 'auth', ct0: 'csrf', fetch: fetchMock, graphQLBase: 'https://x.com/i/api/graphql' })
+    const queryDir = await mkdtemp(join(tmpdir(), 'birdtui-query-'))
+    const client = new TwitterClient({ authToken: 'auth', ct0: 'csrf', fetch: fetchMock, graphQLBase: 'https://x.com/i/api/graphql', queryIdPath: join(queryDir, 'queryids.json') })
     const posted = await client.reply({ tweetId: '10', text: 'retry' })
     expect(posted.ok).toBe(true)
     expect(createAttempts).toBe(2)
