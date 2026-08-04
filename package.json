@@ -2,6 +2,7 @@
   "name": "tweeter",
   "version": "0.1.0",
   "description": "Local Twitter/X terminal UI powered by Bun and TypeScript",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "tweeter": "./dist/cli.js"

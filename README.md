@@ -165,3 +165,7 @@ Implemented:
 Live X GraphQL endpoints can still break when operation IDs or response shapes change; query ID refresh and tests are set up to make those failures visible. Replies additionally depend on X's automation heuristic, which X can tighten at any time.
 
 The official X v2 API client and its OAuth 2.0 PKCE flow are still in the tree, behind `tweeter auth twitter --client-id <id>`. Nothing in the TUI uses them now that cookies post replies. They stay as a paid fallback if X ever closes the cookie write path.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
