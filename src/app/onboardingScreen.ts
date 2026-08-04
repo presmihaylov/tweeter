@@ -8,6 +8,16 @@ export type OnboardingScreen = {
   setSaving(saving: boolean): void
 }
 
+// The whole setup is these two cookies, so the screen spells out where they live rather
+// than sending the reader to the README.
+export const onboardingSteps = [
+  '1. Open x.com in your browser and sign in.',
+  '2. Open DevTools (F12 or Cmd+Opt+I) and pick the Application tab (Storage in Firefox).',
+  '3. Expand Cookies in the sidebar and click https://x.com.',
+  '4. Copy the Value of auth_token, then of ct0, and paste each one below.',
+  '5. Treat both as passwords. Anyone holding them is signed in as you.'
+].join('\n')
+
 export const createOnboardingScreen = (
   renderer: CliRenderer,
   onSubmit: (credentials: OnboardingCredentials) => Promise<void>
@@ -28,7 +38,7 @@ export const createOnboardingScreen = (
   const card = new BoxRenderable(renderer, {
     id: 'onboarding-card',
     width: 92,
-    height: 34,
+    height: 38,
     border: true,
     borderStyle: 'rounded',
     borderColor: '#30363d',
@@ -48,7 +58,7 @@ export const createOnboardingScreen = (
 
   const title = new TextRenderable(renderer, {
     id: 'onboarding-title',
-    content: 'Connect birdtui',
+    content: 'Connect tweeter',
     fg: '#f0f6fc',
     height: 1,
     width: '100%'
@@ -56,7 +66,7 @@ export const createOnboardingScreen = (
 
   const subtitle = new TextRenderable(renderer, {
     id: 'onboarding-subtitle',
-    content: 'Paste your X cookies once. They stay local in ~/.config/birdtui/config.json.',
+    content: 'Paste two cookies from your signed-in x.com tab. They read the timeline and send replies.',
     fg: '#8b949e',
     height: 1,
     width: '100%'
@@ -64,15 +74,16 @@ export const createOnboardingScreen = (
 
   const help = new TextRenderable(renderer, {
     id: 'onboarding-help',
-    content: 'Get cookies from x.com → DevTools → Application/Storage → Cookies → auth_token + ct0',
+    content: onboardingSteps,
     fg: '#58a6ff',
-    height: 1,
-    width: '100%'
+    height: 6,
+    width: '100%',
+    wrapMode: 'word'
   })
 
   const writeHelp = new TextRenderable(renderer, {
     id: 'onboarding-write-help',
-    content: 'Replies use the official X API. After saving cookies, run: bird auth twitter --client-id <id>',
+    content: 'The cookies never leave this machine. They are stored in ~/.config/tweeter/config.json.',
     fg: '#f2cc60',
     height: 1,
     width: '100%'

@@ -11,7 +11,7 @@ describe('startLoopbackServer', () => {
       const response = await fetch(`${handle.redirectUri}?code=ABC&state=XYZ`)
       expect(response.status).toBe(200)
       const html = await response.text()
-      expect(html).toContain('birdtui connected')
+      expect(html).toContain('tweeter connected')
       const callback = await callbackPromise
       expect(callback.ok).toBe(true)
       if (callback.ok) {

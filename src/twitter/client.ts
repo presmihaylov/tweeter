@@ -1,13 +1,14 @@
 import { defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, tweetDetailQueryIdFallbacks } from './constants.ts'
-import { buildArticleFieldToggles, buildHomeTimelineFeatures, buildTweetDetailFeatures } from './features.ts'
+import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildTweetDetailFeatures } from './features.ts'
 import { GraphQLClient } from './graphql.ts'
 import { HeaderBuilder } from './headers.ts'
 import { QueryIdStore } from './queryIds.ts'
-import type { AuthStatus, ConversationPage, TimelinePage, TweetBundle, TwitterClientOptions } from './types.ts'
+import type { AuthStatus, ConversationPage, DeleteResult, PostResult, TimelinePage, TweetBundle, TwitterClientOptions } from './types.ts'
 import { extractCursorFromInstructions, getHomeInstructions, getTweetDetailInstructions, parseTweetsFromInstructions } from './extract/index.ts'
-import { getStr, isRecord } from '../utils/guards.ts'
+import { getMap, getSlice, getStr, isRecord } from '../utils/guards.ts'
 import type { Fetcher } from '../utils/fetcher.ts'
 import { defaultFetcher } from '../utils/fetcher.ts'
+import { errorMessage } from '../utils/result.ts'
 import type { DebugLogger } from '../utils/debugLog.ts'
 
 export class TwitterClient {
@@ -28,7 +29,7 @@ export class TwitterClient {
       userAgent: opts.userAgent ?? defaultUserAgent,
       cookieHeader: opts.cookieHeader
     })
-    this.queryIds = new QueryIdStore(opts.queryIdPath, this.fetchImpl)
+    this.queryIds = new QueryIdStore(opts.queryIdPath, this.fetchImpl, () => this.headers.htmlHeaders())
     this.gql = new GraphQLClient(opts.graphQLBase ?? defaultGraphQLBase, this.headers, this.fetchImpl)
   }
 
@@ -60,6 +61,15 @@ export class TwitterClient {
         continue
       }
     }
+    // X retired the v1.1 account endpoints, so fall back to the read path the TUI actually uses.
+    try {
+      const page = await this.loadHomeTimelinePage({ count: 1, following: true })
+      if (page.tweets.length > 0) {
+        return { ok: true, source: 'timeline-probe' }
+      }
+    } catch {
+      return { ok: false, error: 'X cookies rejected; refresh auth_token and ct0' }
+    }
     return { ok: false, error: 'could not verify X credentials' }
   }
 
@@ -75,7 +85,7 @@ export class TwitterClient {
     if (args.cursor) {
       variables.cursor = args.cursor
     }
-    const body = await this.withQueryIdRetry(operationName, [], async (queryId) => {
+    const { body } = await this.withQueryIdRetry(operationName, [], async (queryId) => {
       return this.gql.get(operationName, queryId, variables, buildHomeTimelineFeatures())
     })
     const instructions = getHomeInstructions(body)
@@ -122,27 +132,62 @@ export class TwitterClient {
     if (cursor) {
       variables.cursor = cursor
     }
-    return this.withQueryIdRetry('TweetDetail', [...tweetDetailQueryIdFallbacks], async (queryId) => {
+    const { body } = await this.withQueryIdRetry('TweetDetail', [...tweetDetailQueryIdFallbacks], async (queryId) => {
       return this.gql.getThenPost('TweetDetail', queryId, variables, buildTweetDetailFeatures(), buildArticleFieldToggles())
     })
+    return body
   }
 
-  private async withQueryIdRetry(operationName: string, extraFallbacks: string[], call: (queryId: string) => Promise<{ body: unknown; status: number }>): Promise<unknown> {
+  // The web app posts a reply with the same cookies it reads with, so the TUI does too.
+  // The reply block is what makes CreateTweet answer a tweet instead of starting one.
+  async replyToTweet(args: { tweetId: string; text: string }): Promise<PostResult> {
+    const variables: Record<string, unknown> = {
+      tweet_text: args.text,
+      reply: { in_reply_to_tweet_id: args.tweetId, exclude_reply_user_ids: [] },
+      dark_request: false,
+      media: { media_entities: [], possibly_sensitive: false },
+      semantic_annotation_ids: []
+    }
+    try {
+      const { body, status } = await this.withQueryIdRetry('CreateTweet', [], async (queryId) => {
+        return this.gql.post('CreateTweet', queryId, variables, buildCreateTweetFeatures(), undefined, this.headers.jsonHeaders({ referer: 'https://x.com/home' }))
+      })
+      return interpretCreateTweet(body, status)
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) }
+    }
+  }
+
+  async deleteTweet(tweetId: string): Promise<DeleteResult> {
+    try {
+      const { body, status } = await this.withQueryIdRetry('DeleteTweet', [], async (queryId) => {
+        return this.gql.post('DeleteTweet', queryId, { tweet_id: tweetId, dark_request: false }, {}, undefined, this.headers.jsonHeaders({ referer: 'https://x.com/home' }))
+      })
+      if (getMap(getMap(body, 'data'), 'delete_tweet') !== undefined) {
+        return { ok: true }
+      }
+      return { ok: false, ...graphQLError(body, status) }
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) }
+    }
+  }
+
+  private async withQueryIdRetry(operationName: string, extraFallbacks: string[], call: (queryId: string) => Promise<{ body: unknown; status: number }>): Promise<{ body: unknown; status: number }> {
     const primary = await this.queryIds.get(operationName)
     const candidates = [...new Set([primary, ...extraFallbacks].filter((id) => id !== ''))]
     for (const candidate of candidates) {
-      const { body, status } = await call(candidate)
-      if (status !== 404) {
-        return body
+      const result = await call(candidate)
+      if (result.status !== 404) {
+        return result
       }
     }
     try {
       await this.queryIds.refresh(this.baseUrl)
       const refreshed = await this.queryIds.get(operationName)
       if (refreshed !== '' && !candidates.includes(refreshed)) {
-        const { body, status } = await call(refreshed)
-        if (status !== 404) {
-          return body
+        const result = await call(refreshed)
+        if (result.status !== 404) {
+          return result
         }
       }
     } catch {
@@ -150,6 +195,33 @@ export class TwitterClient {
     }
     throw new Error(`all query IDs returned 404 for ${operationName}`)
   }
+}
+
+// X answers a refused write with HTTP 200 and an errors array, so the status alone never
+// says whether the reply landed. The created tweet's id is the only proof of success.
+const interpretCreateTweet = (body: unknown, status: number): PostResult => {
+  const created = getMap(getMap(getMap(body, 'data'), 'create_tweet'), 'tweet_results')
+  const tweetId = getStr(getMap(created, 'result'), 'rest_id')
+  if (tweetId !== '') {
+    return { ok: true, tweetId }
+  }
+  return { ok: false, ...graphQLError(body, status) }
+}
+
+const graphQLError = (body: unknown, status: number): { error: string; code?: number; status: number } => {
+  for (const item of getSlice(body, 'errors') ?? []) {
+    const message = getStr(item, 'message')
+    if (message === '') {
+      continue
+    }
+    const code = isRecord(item) && typeof item.code === 'number' ? Math.trunc(item.code) : undefined
+    // X prefixes a refusal with "Authorization: " and repeats the code in brackets.
+    return { error: message.replace(/^Authorization:\s*/, '').replace(/\s*\(\d+\)$/, ''), code, status }
+  }
+  if (status === 401 || status === 403) {
+    return { error: 'X rejected the cookies; refresh auth_token and ct0', status }
+  }
+  return { error: `X refused the write with status ${status}`, status }
 }
 
 const parseCurrentUser = (text: string): AuthStatus => {

@@ -1,14 +1,16 @@
 {
-  "name": "birdtui",
+  "name": "tweeter",
   "version": "0.1.0",
   "description": "Local Twitter/X terminal UI powered by Bun and TypeScript",
   "type": "module",
   "bin": {
-    "bird": "./dist/cli.js"
+    "tweeter": "./dist/cli.js"
   },
   "scripts": {
     "dev": "bun run src/cli.ts",
     "build": "rm -rf dist && bun build src/cli.ts --target=bun --outdir=dist --entry-naming=cli.js && chmod +x dist/cli.js",
+    "build:bin": "bun build src/cli.ts --compile --outfile dist/tweeter",
+    "install:local": "bun run build:bin && mkdir -p \"$HOME/.local/bin\" && install -m 755 dist/tweeter \"$HOME/.local/bin/tweeter\" && echo \"installed $HOME/.local/bin/tweeter\"",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "bun test",

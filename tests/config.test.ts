@@ -3,11 +3,28 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { importBirdgoConfig } from '../src/config/birdgoImport.ts'
-import { ConfigStore } from '../src/config/store.ts'
+import { ConfigStore, importLegacyConfig } from '../src/config/store.ts'
 
 describe('config', () => {
+  test('imports the pre-rename birdtui config', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tweeter-legacy-'))
+    const path = join(dir, 'config.json')
+    await writeFile(path, JSON.stringify({
+      defaultProfile: 'me',
+      profiles: { me: { authToken: 'a', ct0: 'c', xApi: { clientId: 'C', accessToken: 'A', refreshToken: 'R', expiresAt: 1 } } }
+    }))
+    const imported = await importLegacyConfig(path)
+    expect(imported?.defaultProfile).toBe('me')
+    expect(imported?.profiles.me?.xApi?.accessToken).toBe('A')
+  })
+
+  test('skips legacy import when the file is absent', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tweeter-legacy-'))
+    expect(await importLegacyConfig(join(dir, 'missing.json'))).toBeUndefined()
+  })
+
   test('imports birdgo profiles', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'birdtui-config-'))
+    const dir = await mkdtemp(join(tmpdir(), 'tweeter-config-'))
     const path = join(dir, 'config.json')
     await writeFile(path, JSON.stringify({ defaultProfile: 'me', profiles: { me: { authToken: 'a', ct0: 'c' } } }))
     const imported = await importBirdgoConfig(path)
@@ -16,7 +33,7 @@ describe('config', () => {
   })
 
   test('saves upserted profile', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'birdtui-config-'))
+    const dir = await mkdtemp(join(tmpdir(), 'tweeter-config-'))
     const path = join(dir, 'config.json')
     const store = new ConfigStore(path)
     await store.upsertProfile('default', { authToken: 'auth', ct0: 'csrf' })
@@ -25,7 +42,7 @@ describe('config', () => {
   })
 
   test('preserves and updates full cookie header', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'birdtui-config-'))
+    const dir = await mkdtemp(join(tmpdir(), 'tweeter-config-'))
     const path = join(dir, 'config.json')
     const store = new ConfigStore(path)
     await store.upsertProfile('default', { authToken: 'auth', ct0: 'csrf', cookieHeader: 'auth_token=auth; ct0=csrf; twid=u%3D1' })
@@ -35,7 +52,7 @@ describe('config', () => {
   })
 
   test('setXApiTokens persists OAuth tokens on the profile', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'birdtui-config-'))
+    const dir = await mkdtemp(join(tmpdir(), 'tweeter-config-'))
     const path = join(dir, 'config.json')
     const store = new ConfigStore(path)
     await store.upsertProfile('default', { authToken: 'auth', ct0: 'csrf' })
@@ -52,7 +69,7 @@ describe('config', () => {
   })
 
   test('setXApiTokens throws when profile is missing', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'birdtui-config-'))
+    const dir = await mkdtemp(join(tmpdir(), 'tweeter-config-'))
     const path = join(dir, 'config.json')
     const store = new ConfigStore(path)
     await expect(store.setXApiTokens('missing', {
@@ -61,7 +78,7 @@ describe('config', () => {
   })
 
   test('upsertProfile preserves existing xApi tokens', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'birdtui-config-'))
+    const dir = await mkdtemp(join(tmpdir(), 'tweeter-config-'))
     const path = join(dir, 'config.json')
     const store = new ConfigStore(path)
     await store.upsertProfile('default', { authToken: 'auth', ct0: 'csrf' })

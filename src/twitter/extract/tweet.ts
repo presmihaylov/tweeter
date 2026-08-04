@@ -21,14 +21,28 @@ export const mapTweetResult = (result: unknown, quoteDepth = 1): AppTweet | unde
     return undefined
   }
   const legacy = getMap(unwrapped, 'legacy')
+  // A repost carries nothing of its own: its text is the original cut at 140 characters,
+  // it has no media and no replies. Only the original is worth showing.
+  const repost = getMap(getMap(legacy, 'retweeted_status_result'), 'result')
+  if (repost) {
+    const original = mapTweetResult(repost, quoteDepth)
+    return original ? { ...original, repostedBy: { handle, name } } : undefined
+  }
   const views = getMap(unwrapped, 'views')
   const quotedResult = getMap(getMap(unwrapped, 'quoted_status_result'), 'result')
   const quotedTweet = quoteDepth > 0 && quotedResult ? mapTweetResult(quotedResult, quoteDepth - 1) : undefined
   const authorId = getStr(userResult, 'rest_id')
+  const avatarUrl = getStr(getMap(userResult, 'avatar'), 'image_url') || getStr(userLegacy, 'profile_image_url_https')
   return stripUndefined({
     id,
     text,
-    author: stripUndefined({ id: authorId || undefined, handle, name }),
+    author: stripUndefined({
+      id: authorId || undefined,
+      handle,
+      name,
+      avatarUrl: upsizeAvatar(avatarUrl) || undefined,
+      verified: getBool(userResult, 'is_blue_verified') || getBool(userLegacy, 'verified') || undefined
+    }),
     createdAt: getStr(legacy, 'created_at') || undefined,
     media: extractMedia(unwrapped),
     metrics: stripUndefined({
@@ -47,6 +61,9 @@ export const mapTweetResult = (result: unknown, quoteDepth = 1): AppTweet | unde
     retweeted: getBool(legacy, 'retweeted') || undefined
   })
 }
+
+// X serves avatars at 48px under the _normal suffix; the 400px variant survives a TUI upscale.
+export const upsizeAvatar = (url: string): string => url.replace(/_normal\.(jpg|jpeg|png|gif|webp)$/i, '_400x400.$1')
 
 export const collectTweetResultsFromEntry = (entry: unknown): unknown[] => {
   const results: unknown[] = []

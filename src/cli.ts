@@ -26,31 +26,31 @@ type AuthTwitterOptions = {
   help: boolean
 }
 
-const runUsage = `birdtui
+const runUsage = `tweeter
 
 Usage:
-  bird [--profile name] [--renderer auto|chafa|kitty|none] [--debug-log path]
-  bird --check-auth [--profile name]
-  bird --set-cookie-header 'name=value; ...' [--profile name]
-  bird --reset-auth
-  bird auth twitter --client-id <id> [--profile name] [--port N] [--no-browser]
+  tweeter [--profile name] [--renderer auto|chafa|kitty|none] [--debug-log path]
+  tweeter --check-auth [--profile name]
+  tweeter --set-cookie-header 'name=value; ...' [--profile name]
+  tweeter --reset-auth
+  tweeter auth twitter --client-id <id> [--profile name] [--port N] [--no-browser]
 
 Keys:
   q quit, R refresh, Tab switch feed, j/k select, Enter load replies, r reply
 `
 
-const authTwitterUsage = `bird auth twitter
+const authTwitterUsage = `tweeter auth twitter
 
 Run the X (Twitter) OAuth 2.0 PKCE flow and save access + refresh tokens
 to the selected profile. Used by reply / new tweet calls via the official
 X v2 API.
 
 Usage:
-  bird auth twitter --client-id <id> [--profile name] [--port N] [--no-browser]
+  tweeter auth twitter --client-id <id> [--profile name] [--port N] [--no-browser]
 
 Flags:
   --client-id   OAuth 2.0 client ID from developer.x.com (required)
-  --profile     Profile to attach tokens to (default: birdtui's defaultProfile)
+  --profile     Profile to attach tokens to (default: tweeter's defaultProfile)
   --port        Local loopback port (default: random free port)
   --no-browser  Don't try to open the browser automatically
 `
@@ -172,7 +172,7 @@ const runAuthTwitter = async (argv: string[]): Promise<void> => {
   const config = await store.load()
   const selected = getProfile(config, opts.profile)
   if (!selected) {
-    console.error('no profile configured; run `bird` once to set up cookies first')
+    console.error('no profile configured; run `tweeter` once to set up cookies first')
     process.exitCode = 1
     return
   }
@@ -239,7 +239,7 @@ const runMainCommand = async (argv: string[]): Promise<void> => {
       process.exitCode = 1
       return
     }
-    console.log(`ok @${status.username}`)
+    console.log(status.username ? `ok @${status.username}` : `ok (verified via ${status.source})`)
     return
   }
   await runTerminalApp({ config, profileName: selected?.name, profile: selected?.profile, renderer: opts.renderer, debugLog: opts.debugLog })

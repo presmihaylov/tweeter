@@ -7,8 +7,12 @@ export const fallbackQueryIds: Readonly<Record<string, string>> = {
   TweetDetail: '97JF30KziU00483E_8elBA',
   HomeTimeline: 'edseUwk9sP5Phz__9TIRnA',
   HomeLatestTimeline: 'iOEZpOdfekFsxSlPQCQtPg',
-  UserByScreenName: 'xc8f1g7BYqr6VTzTbvNlGw'
+  UserByScreenName: 'xc8f1g7BYqr6VTzTbvNlGw',
+  CreateTweet: 'wUgPBh9hEKhMMGlg8uDuFw',
+  DeleteTweet: 'nxpZCY2K-I6QoFHAHeojFQ'
 }
+
+export const tweetTextLimit = 280
 
 export const tweetDetailQueryIdFallbacks = ['97JF30KziU00483E_8elBA', 'aFvUsJm2c-oDkJV75blV6g'] as const
 export const targetOperations = Object.keys(fallbackQueryIds)

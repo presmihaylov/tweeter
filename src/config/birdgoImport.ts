@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { z } from 'zod'
 import { birdgoConfigPath } from './paths.ts'
-import type { BirdTuiConfig } from './schema.ts'
+import type { TweeterConfig } from './schema.ts'
 import { nowIso } from '../utils/time.ts'
 import { readJsonFile } from '../utils/fs.ts'
 
@@ -17,7 +17,7 @@ const birdgoConfigSchema = z.object({
 
 export const canImportBirdgoConfig = (path = birdgoConfigPath()): boolean => existsSync(path)
 
-export const importBirdgoConfig = async (path = birdgoConfigPath()): Promise<BirdTuiConfig | undefined> => {
+export const importBirdgoConfig = async (path = birdgoConfigPath()): Promise<TweeterConfig | undefined> => {
   if (!existsSync(path)) {
     return undefined
   }

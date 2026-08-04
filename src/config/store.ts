@@ -1,40 +1,51 @@
 import { existsSync } from 'node:fs'
-import type { BirdTuiConfig, BirdTuiProfile, XApiTokens } from './schema.ts'
-import { birdTuiConfigSchema, emptyConfig } from './schema.ts'
-import { configPath } from './paths.ts'
+import type { TweeterConfig, TweeterProfile, XApiTokens } from './schema.ts'
+import { tweeterConfigSchema, emptyConfig } from './schema.ts'
+import { configPath, legacyConfigPath } from './paths.ts'
 import { importBirdgoConfig } from './birdgoImport.ts'
 import { readJsonFile, writeJsonFile } from '../utils/fs.ts'
 import { nowIso } from '../utils/time.ts'
 
+export const importLegacyConfig = async (path = legacyConfigPath()): Promise<TweeterConfig | undefined> => {
+  if (!existsSync(path)) {
+    return undefined
+  }
+  const parsed = tweeterConfigSchema.safeParse(await readJsonFile(path))
+  if (!parsed.success) {
+    return undefined
+  }
+  return parsed.data
+}
+
 export class ConfigStore {
   constructor(private readonly path = configPath()) {}
 
-  async load(): Promise<BirdTuiConfig> {
+  async load(): Promise<TweeterConfig> {
     if (!existsSync(this.path)) {
-      const imported = await importBirdgoConfig()
+      const imported = await importLegacyConfig() ?? await importBirdgoConfig()
       if (imported) {
         await this.save(imported)
         return imported
       }
       return emptyConfig()
     }
-    const parsed = birdTuiConfigSchema.safeParse(await readJsonFile(this.path))
+    const parsed = tweeterConfigSchema.safeParse(await readJsonFile(this.path))
     if (!parsed.success) {
-      throw new Error(`invalid birdtui config: ${parsed.error.message}`)
+      throw new Error(`invalid tweeter config: ${parsed.error.message}`)
     }
     return parsed.data
   }
 
-  async save(config: BirdTuiConfig): Promise<void> {
-    const parsed = birdTuiConfigSchema.parse(config)
+  async save(config: TweeterConfig): Promise<void> {
+    const parsed = tweeterConfigSchema.parse(config)
     await writeJsonFile(this.path, parsed)
   }
 
-  async upsertProfile(name: string, profile: Pick<BirdTuiProfile, 'authToken' | 'ct0'> & Pick<Partial<BirdTuiProfile>, 'cookieHeader'>): Promise<BirdTuiConfig> {
+  async upsertProfile(name: string, profile: Pick<TweeterProfile, 'authToken' | 'ct0'> & Pick<Partial<TweeterProfile>, 'cookieHeader'>): Promise<TweeterConfig> {
     const cfg = await this.load()
     const existing = cfg.profiles[name]
     const timestamp = nowIso()
-    const nextProfile: BirdTuiProfile = {
+    const nextProfile: TweeterProfile = {
       authToken: profile.authToken,
       ct0: profile.ct0,
       cookieHeader: profile.cookieHeader ?? existing?.cookieHeader,
@@ -42,7 +53,7 @@ export class ConfigStore {
       createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp
     }
-    const next: BirdTuiConfig = {
+    const next: TweeterConfig = {
       ...cfg,
       defaultProfile: cfg.defaultProfile && cfg.profiles[cfg.defaultProfile] ? cfg.defaultProfile : name,
       profiles: { ...cfg.profiles, [name]: nextProfile }
@@ -51,18 +62,18 @@ export class ConfigStore {
     return next
   }
 
-  async setXApiTokens(name: string, tokens: XApiTokens): Promise<BirdTuiConfig> {
+  async setXApiTokens(name: string, tokens: XApiTokens): Promise<TweeterConfig> {
     const cfg = await this.load()
     const existing = cfg.profiles[name]
     if (!existing) {
       throw new Error(`profile not found: ${name}`)
     }
-    const nextProfile: BirdTuiProfile = {
+    const nextProfile: TweeterProfile = {
       ...existing,
       xApi: tokens,
       updatedAt: nowIso()
     }
-    const next: BirdTuiConfig = {
+    const next: TweeterConfig = {
       ...cfg,
       profiles: { ...cfg.profiles, [name]: nextProfile }
     }
@@ -71,7 +82,7 @@ export class ConfigStore {
   }
 }
 
-export const getProfile = (config: BirdTuiConfig, requested?: string): { name: string; profile: BirdTuiProfile } | undefined => {
+export const getProfile = (config: TweeterConfig, requested?: string): { name: string; profile: TweeterProfile } | undefined => {
   const name = requested ?? config.defaultProfile
   const profile = config.profiles[name]
   if (!profile) {

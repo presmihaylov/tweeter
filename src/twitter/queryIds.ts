@@ -16,7 +16,11 @@ type QueryIdCache = z.infer<typeof queryIdCacheSchema>
 export class QueryIdStore {
   private cache: QueryIdCache | undefined
 
-  constructor(private readonly path = queryIdsPath(), private readonly fetchImpl: Fetcher = defaultFetcher) {}
+  constructor(
+    private readonly path = queryIdsPath(),
+    private readonly fetchImpl: Fetcher = defaultFetcher,
+    private readonly htmlHeaders?: () => HeadersInit
+  ) {}
 
   async load(): Promise<QueryIdCache> {
     if (!existsSync(this.path)) {
@@ -42,18 +46,36 @@ export class QueryIdStore {
     return cache.operations[operationName] ?? fallbackQueryIds[operationName] ?? ''
   }
 
-  async refresh(baseUrl = 'https://x.com'): Promise<QueryIdCache> {
-    const htmlResponse = await this.fetchImpl(baseUrl)
-    if (!htmlResponse.ok) {
-      throw new Error(`query id discovery failed: HTTP ${htmlResponse.status}`)
+  // The logged-out shell links one loader script and no query ids. Only the signed-in
+  // /home page links the vendor and main bundles that carry them, so ask for that first.
+  private async fetchShell(baseUrl: string): Promise<string> {
+    const urls = [`${baseUrl}/home`, baseUrl]
+    for (const url of urls) {
+      const response = await this.fetchImpl(url, { headers: this.htmlHeaders?.() })
+      if (!response.ok) {
+        continue
+      }
+      const html = await response.text()
+      if (/src=["'][^"']+\.js["']/.test(html)) {
+        return html
+      }
     }
-    const html = await htmlResponse.text()
+    throw new Error('query id discovery failed: no script bundles in the x.com shell')
+  }
+
+  async refresh(baseUrl = 'https://x.com'): Promise<QueryIdCache> {
+    const html = await this.fetchShell(baseUrl)
     const jsPaths = [...html.matchAll(/src=["']([^"']+\.js)["']/g)]
       .map(match => match[1])
       .filter((path): path is string => typeof path === 'string')
+      // The ad script is on the page too, and it can never hold a query id.
+      .filter((path) => path.includes('twimg.com') || !path.startsWith('http'))
       .slice(0, 40)
     const operations: Record<string, string> = {}
     for (const jsPath of jsPaths) {
+      if (Object.keys(operations).length === targetOperations.length) {
+        break
+      }
       const url = jsPath.startsWith('http') ? jsPath : new URL(jsPath, baseUrl).toString()
       const response = await this.fetchImpl(url)
       if (!response.ok) {

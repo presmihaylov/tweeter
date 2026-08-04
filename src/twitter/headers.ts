@@ -45,7 +45,16 @@ export class HeaderBuilder {
       cookie: this.cookieHeader(),
       'user-agent': this.opts.userAgent ?? defaultUserAgent,
       origin: options.origin ?? 'https://x.com',
-      referer: options.referer ?? 'https://x.com/'
+      referer: options.referer ?? 'https://x.com/',
+      // Reads pass without these. A write does not: X answers a request that omits the
+      // browser fingerprint headers with error 226, "this request looks automated".
+      'sec-ch-ua': '"Chromium";v="146", "Not_A Brand";v="24", "Google Chrome";v="146"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"macOS"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      priority: 'u=1, i'
     }
     if (this.clientUserId) {
       headers['x-twitter-client-user-id'] = this.clientUserId
@@ -55,5 +64,16 @@ export class HeaderBuilder {
 
   jsonHeaders(options: { authType?: 'OAuth2Session' | 'OAuth2Client'; origin?: string; referer?: string } = {}): HeadersInit {
     return { ...this.baseHeaders(options), 'content-type': 'application/json' }
+  }
+
+  // Fetching the app shell needs the cookie and nothing else. The API headers would make
+  // x.com answer with JSON instead of the HTML that lists the script bundles.
+  htmlHeaders(): HeadersInit {
+    return {
+      accept: 'text/html,application/xhtml+xml',
+      'accept-language': 'en-US,en;q=0.9',
+      cookie: this.cookieHeader(),
+      'user-agent': this.opts.userAgent ?? defaultUserAgent
+    }
   }
 }

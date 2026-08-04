@@ -19,7 +19,7 @@ export const profileSchema = z.object({
   updatedAt: z.string().optional()
 })
 
-export const birdTuiConfigSchema = z.object({
+export const tweeterConfigSchema = z.object({
   defaultProfile: z.string().min(1),
   profiles: z.record(z.string(), profileSchema),
   ui: z.object({
@@ -28,8 +28,8 @@ export const birdTuiConfigSchema = z.object({
   }).optional()
 })
 
-export type BirdTuiConfig = z.infer<typeof birdTuiConfigSchema>
-export type BirdTuiProfile = z.infer<typeof profileSchema>
+export type TweeterConfig = z.infer<typeof tweeterConfigSchema>
+export type TweeterProfile = z.infer<typeof profileSchema>
 export type XApiTokens = z.infer<typeof xApiTokensSchema>
 
-export const emptyConfig = (): BirdTuiConfig => ({ defaultProfile: 'default', profiles: {} })
+export const emptyConfig = (): TweeterConfig => ({ defaultProfile: 'default', profiles: {} })

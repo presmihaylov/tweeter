@@ -41,7 +41,7 @@ export const startLoopbackServer = async (path = '/callback', preferredPort = 0)
       return
     }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-    res.end(renderResultPage('birdtui connected', 'You can close this tab and return to the terminal.'))
+    res.end(renderResultPage('tweeter connected', 'You can close this tab and return to the terminal.'))
     resolveCallback({ ok: true, code, state })
   }
 

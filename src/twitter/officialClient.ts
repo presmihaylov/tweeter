@@ -127,7 +127,7 @@ const interpretResponse = (parsed: unknown, status: number, raw: string): PostRe
     return { ok: false, error: `X API error: ${error.message}`, code: error.code, status }
   }
   if (status === 401) {
-    return { ok: false, error: 'X API rejected the access token; run `bird auth twitter` to reconnect', status }
+    return { ok: false, error: 'X API rejected the access token; run `tweeter auth twitter` to reconnect', status }
   }
   if (status === 429) {
     return { ok: false, error: 'X API rate limit exceeded; try again later', status }
