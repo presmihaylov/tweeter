@@ -1,3 +1,11 @@
+import transactionIdFixture from './fixtures/transactionId.json' with { type: 'json' }
+
+// The signed-in shell, cut down to the two parts the transaction id needs: the verification
+// key and the four animation SVGs. The SVGs are the real ones; the key is random bytes.
+export const shellHtml = (extra = ''): string =>
+  `<html><head><meta name="twitter-site-verification" content="${transactionIdFixture.cases[0]?.verificationKey ?? ''}">${extra}</head>` +
+  `<body>${transactionIdFixture.animSvgs.join('')}</body></html>`
+
 export const jsonResponse = (value: unknown, init: ResponseInit = {}): Response => {
   return new Response(JSON.stringify(value), { status: init.status ?? 200, headers: { 'content-type': 'application/json' } })
 }
@@ -78,14 +86,86 @@ export const timelineBody = (tweets: unknown[]): unknown => ({
   }
 })
 
-export const tweetDetailBody = (tweet: unknown, replies: unknown[]): unknown => ({
+const tweetId = (tweet: unknown): string => String((tweet as { rest_id: string }).rest_id)
+
+export const asReplyTo = (tweet: unknown, parentId: string): unknown => {
+  const record = tweet as { legacy: Record<string, unknown> }
+  return { ...record, legacy: { ...record.legacy, in_reply_to_status_id_str: parentId } }
+}
+
+// How X surfaces a reply from somebody you follow in the home feed: the answered tweet and
+// the answer in one module, oldest first.
+export const homeConversationEntry = (tweets: unknown[], moduleId = '900'): unknown => ({
+  entryId: `home-conversation-${moduleId}`,
+  content: {
+    entryType: 'TimelineTimelineModule',
+    displayType: 'VerticalConversation',
+    items: tweets.map((tweet) => ({
+      entryId: `home-conversation-${moduleId}-tweet-${tweetId(tweet)}`,
+      item: { itemContent: { itemType: 'TimelineTweet', tweet_results: { result: tweet } } }
+    }))
+  }
+})
+
+export const promotedTweetEntry = (tweet: unknown): unknown => ({
+  entryId: `promoted-tweet-${tweetId(tweet)}-6b760d2607570e13`,
+  content: { entryType: 'TimelineTimelineItem', itemContent: { tweet_results: { result: tweet } } }
+})
+
+export const homeEntries = (entries: unknown[]): unknown[] => [{ entries }]
+
+export const homeTweetEntry = (tweet: unknown): unknown => ({
+  entryId: `tweet-${tweetId(tweet)}`,
+  content: { entryType: 'TimelineTimelineItem', itemContent: { tweet_results: { result: tweet } } }
+})
+
+// Mirrors X's TweetDetail shape: the focal tweet as a tweet-* item, each reply as its own
+// conversationthread-* module.
+const conversationThreadEntry = (reply: unknown): unknown => {
+  const id = tweetId(reply)
+  return {
+    entryId: `conversationthread-${id}`,
+    content: {
+      entryType: 'TimelineTimelineModule',
+      items: [{ entryId: `conversationthread-${id}-tweet-${id}`, item: { itemContent: { tweet_results: { result: reply } } } }]
+    }
+  }
+}
+
+// The "Discover more" block X appends when a conversation is thin. Not a reply.
+export const relatedTweetsEntry = (tweet: unknown): unknown => {
+  const id = tweetId(tweet)
+  return {
+    entryId: `tweetdetailrelatedtweets-${id}`,
+    content: {
+      entryType: 'TimelineTimelineModule',
+      header: { text: 'Discover more' },
+      items: [{ entryId: `tweetdetailrelatedtweets-${id}-tweet-${id}`, item: { itemContent: { tweet_results: { result: tweet } } } }]
+    }
+  }
+}
+
+// An ad X injects inside a reply module.
+export const promotedThreadEntry = (tweet: unknown): unknown => {
+  const id = tweetId(tweet)
+  return {
+    entryId: `conversationthread-${id}`,
+    content: {
+      entryType: 'TimelineTimelineModule',
+      items: [{ entryId: `conversationthread-${id}-promoted-tweet-${id}-abc123`, item: { itemContent: { tweet_results: { result: tweet } } } }]
+    }
+  }
+}
+
+export const tweetDetailBody = (tweet: unknown, replies: unknown[], extraEntries: unknown[] = []): unknown => ({
   data: {
     threaded_conversation_with_injections_v2: {
       instructions: [{
         entries: [
-          { entryId: 'focal', content: { itemContent: { tweet_results: { result: tweet } } } },
-          ...replies.map((reply, index) => ({ entryId: `reply-${index}`, content: { itemContent: { tweet_results: { result: reply } } } })),
-          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: 'reply-cursor' } }
+          { entryId: `tweet-${tweetId(tweet)}`, content: { entryType: 'TimelineTimelineItem', itemContent: { tweet_results: { result: tweet } } } },
+          ...replies.map(conversationThreadEntry),
+          ...extraEntries,
+          { entryId: 'cursor-bottom-1', content: { cursorType: 'Bottom', value: 'reply-cursor' } }
         ]
       }]
     }

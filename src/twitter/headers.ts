@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { bearerToken, defaultUserAgent } from './constants.ts'
 
 export type HeaderOptions = {
@@ -30,7 +30,7 @@ export class HeaderBuilder {
     return this.opts.cookieHeader ?? `auth_token=${this.opts.authToken}; ct0=${this.opts.ct0}`
   }
 
-  baseHeaders(options: { authType?: 'OAuth2Session' | 'OAuth2Client'; origin?: string; referer?: string } = {}): HeadersInit {
+  baseHeaders(options: { authType?: 'OAuth2Session' | 'OAuth2Client'; origin?: string; referer?: string } = {}): Record<string, string> {
     const headers: Record<string, string> = {
       accept: '*/*',
       'accept-language': 'en-US,en;q=0.9',
@@ -41,7 +41,8 @@ export class HeaderBuilder {
       'x-twitter-client-language': 'en',
       'x-client-uuid': this.clientUuid,
       'x-twitter-client-deviceid': this.clientDeviceId,
-      'x-client-transaction-id': randomBytes(64).toString('base64'),
+      // x-client-transaction-id is added per request by GraphQLClient, because its value
+      // covers the path and the method. See transactionId.ts.
       cookie: this.cookieHeader(),
       'user-agent': this.opts.userAgent ?? defaultUserAgent,
       origin: options.origin ?? 'https://x.com',
@@ -62,13 +63,13 @@ export class HeaderBuilder {
     return headers
   }
 
-  jsonHeaders(options: { authType?: 'OAuth2Session' | 'OAuth2Client'; origin?: string; referer?: string } = {}): HeadersInit {
+  jsonHeaders(options: { authType?: 'OAuth2Session' | 'OAuth2Client'; origin?: string; referer?: string } = {}): Record<string, string> {
     return { ...this.baseHeaders(options), 'content-type': 'application/json' }
   }
 
   // Fetching the app shell needs the cookie and nothing else. The API headers would make
   // x.com answer with JSON instead of the HTML that lists the script bundles.
-  htmlHeaders(): HeadersInit {
+  htmlHeaders(): Record<string, string> {
     return {
       accept: 'text/html,application/xhtml+xml',
       'accept-language': 'en-US,en;q=0.9',

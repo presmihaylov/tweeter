@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { HeaderBuilder } from '../src/twitter/headers.ts'
 import { extractMedia } from '../src/twitter/extract/media.ts'
-import { parseTweetsFromInstructions, upsizeAvatar } from '../src/twitter/extract/tweet.ts'
+import { parseConversationTweets, parseHomeTweets, parseTweetsFromInstructions, upsizeAvatar } from '../src/twitter/extract/tweet.ts'
 import { findOperationId } from '../src/twitter/queryIds.ts'
 import { TwitterClient } from '../src/twitter/client.ts'
 import { tweetUrl } from '../src/media/openExternal.ts'
-import { asRepost, jsonResponse, makeTweetResult, textResponse, timelineBody, tweetDetailBody, videoEntity, withQuotedTweet } from './helpers.ts'
+import { asReplyTo, asRepost, homeConversationEntry, homeEntries, homeTweetEntry, jsonResponse, makeTweetResult, promotedThreadEntry, promotedTweetEntry, relatedTweetsEntry, textResponse, timelineBody, tweetDetailBody, videoEntity, withQuotedTweet } from './helpers.ts'
 import type { AppTweet } from '../src/twitter/types.ts'
 
 describe('twitter primitives', () => {
@@ -40,6 +40,42 @@ describe('twitter primitives', () => {
     const tweets = parseTweetsFromInstructions(instructions)
     expect(tweets).toHaveLength(1)
     expect(tweets[0]?.author.handle).toBe('alice')
+  })
+
+  test('keeps the tweet a home conversation starts from and drops the replies under it', () => {
+    const root = makeTweetResult('1', 'alice', 'the drought is bad')
+    const reply = asReplyTo(makeTweetResult('2', 'bob', '@alice drill a well'), '1')
+    const second = asReplyTo(makeTweetResult('3', 'carol', '@bob good idea'), '2')
+    const tweets = parseHomeTweets(homeEntries([homeConversationEntry([root, reply, second])]))
+
+    expect(tweets.map((tweet) => tweet.id)).toEqual(['1'])
+    expect(tweets[0]?.author.handle).toBe('alice')
+  })
+
+  test('keeps a plain timeline tweet that answers something, because nothing repeats it', () => {
+    const lone = asReplyTo(makeTweetResult('9', 'dave', '@someone yes'), '8')
+    expect(parseHomeTweets(homeEntries([homeTweetEntry(lone)])).map((tweet) => tweet.id)).toEqual(['9'])
+  })
+
+  test('keeps the first tweet of a conversation module built from replies alone', () => {
+    const first = asReplyTo(makeTweetResult('5', 'alice', '@x one'), '4')
+    const later = asReplyTo(makeTweetResult('6', 'bob', '@alice two'), '5')
+    expect(parseHomeTweets(homeEntries([homeConversationEntry([first, later])])).map((tweet) => tweet.id)).toEqual(['5'])
+  })
+
+  test('drops the ads X mixes into the feed', () => {
+    const entries = [
+      homeTweetEntry(makeTweetResult('1', 'alice', 'hello')),
+      promotedTweetEntry(makeTweetResult('2', 'brand', 'buy this')),
+      homeTweetEntry(makeTweetResult('3', 'bob', 'morning'))
+    ]
+    expect(parseHomeTweets(homeEntries(entries)).map((tweet) => tweet.id)).toEqual(['1', '3'])
+  })
+
+  test('shows a tweet once when it arrives both on its own and inside a conversation', () => {
+    const root = makeTweetResult('1', 'alice', 'hello')
+    const entries = [homeTweetEntry(root), homeConversationEntry([root, asReplyTo(makeTweetResult('2', 'bob', '@alice hi'), '1')])]
+    expect(parseHomeTweets(homeEntries(entries)).map((tweet) => tweet.id)).toEqual(['1'])
   })
 
   test('reads the author avatar and verified badge', () => {
@@ -89,13 +125,71 @@ describe('TwitterClient read paths', () => {
     expect(replies.replies[0]?.id).toBe('11')
   })
 
+  test('sends the sort as enableRanking, and only on the Following feed', async () => {
+    const captured: { operation: string; variables: Record<string, unknown> }[] = []
+    const fetchMock = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = new URL(input.toString())
+      if (!url.pathname.includes('/graphql/')) {
+        return textResponse('', { status: 404 })
+      }
+      const operation = url.pathname.split('/').pop() ?? ''
+      captured.push({ operation, variables: JSON.parse(url.searchParams.get('variables') ?? '{}') as Record<string, unknown> })
+      return jsonResponse(timelineBody([makeTweetResult('10', 'alice', 'root')]))
+    }
+    const client = new TwitterClient({ authToken: 'auth', ct0: 'csrf', fetch: fetchMock, graphQLBase: 'https://x.com/i/api/graphql' })
+    await client.loadHomeTimelinePage({ count: 20, following: true })
+    await client.loadHomeTimelinePage({ count: 20, following: true, ranked: true })
+    await client.loadHomeTimelinePage({ count: 20, following: false, ranked: true })
+    expect(captured.map((call) => call.operation)).toEqual(['HomeLatestTimeline', 'HomeLatestTimeline', 'HomeTimeline'])
+    expect(captured[0]?.variables.enableRanking).toBe(false)
+    expect(captured[1]?.variables.enableRanking).toBe(true)
+    expect(captured[2]?.variables).not.toHaveProperty('enableRanking')
+  })
+
+  test('keeps Discover more tweets and injected ads out of the replies', async () => {
+    const focal = makeTweetResult('10', 'alice', 'root')
+    const reply = makeTweetResult('11', 'bob', 'reply')
+    const discovered = makeTweetResult('12', 'carol', 'sourced from across X')
+    const ad = makeTweetResult('13', 'brand', 'buy this')
+    const body = tweetDetailBody(focal, [reply], [relatedTweetsEntry(discovered), promotedThreadEntry(ad)])
+    const fetchMock = async (input: RequestInfo | URL): Promise<Response> => {
+      return input.toString().includes('TweetDetail') ? jsonResponse(body) : jsonResponse({}, { status: 404 })
+    }
+    const client = new TwitterClient({ authToken: 'auth', ct0: 'csrf', fetch: fetchMock, graphQLBase: 'https://x.com/i/api/graphql' })
+    const page = await client.loadRepliesPage({ tweetId: '10' })
+    expect(page.replies.map((tweet) => tweet.id)).toEqual(['11'])
+    const bundle = await client.getTweet('10')
+    expect(bundle.tweet.id).toBe('10')
+    expect(bundle.related.map((tweet) => tweet.id)).toEqual(['11'])
+  })
+
+  test('a module reply entry still yields its tweets', () => {
+    const instructions = [{
+      entries: [{
+        entryId: 'conversationthread-20',
+        content: { items: [
+          { entryId: 'conversationthread-20-tweet-20', item: { itemContent: { tweet_results: { result: makeTweetResult('20', 'dan', 'first') } } } },
+          { entryId: 'conversationthread-20-tweet-21', item: { itemContent: { tweet_results: { result: makeTweetResult('21', 'dan', 'second') } } } }
+        ] }
+      }]
+    }]
+    expect(parseConversationTweets(instructions).map((tweet) => tweet.id)).toEqual(['20', '21'])
+  })
+
   test('the browser fingerprint headers ride on every request', () => {
     const builder = new HeaderBuilder({ authToken: 'auth', ct0: 'csrf' })
     const headers = builder.jsonHeaders() as Record<string, string>
     // Without these X answers a write with error 226, "this request looks automated".
     expect(headers['sec-fetch-site']).toBe('same-origin')
     expect(headers['sec-ch-ua-platform']).toBe('"macOS"')
-    expect(headers['x-client-transaction-id']?.length).toBeGreaterThan(40)
+  })
+
+  test('never sends a made-up x-client-transaction-id', () => {
+    const builder = new HeaderBuilder({ authToken: 'auth', ct0: 'csrf' })
+    // X validates this header. A fabricated value fails the automation gate every time,
+    // so the header has to be absent until it can be derived like the browser derives it.
+    expect((builder.jsonHeaders() as Record<string, string>)['x-client-transaction-id']).toBeUndefined()
+    expect((builder.htmlHeaders() as Record<string, string>)['x-client-transaction-id']).toBeUndefined()
   })
 
   test('html headers carry the cookie but not the API bearer', () => {

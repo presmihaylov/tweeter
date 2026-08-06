@@ -53,18 +53,20 @@ Pasting the full `Cookie` request header is the most reliable route, because X s
 
 - `j` / `k` — move the feed selection, whatever the arrows are pointed at
 - `Tab` — switch between Following and For You
-- `R` — refresh the feed
-- `→` — point the arrows at the replies, on the first one
+- `s` — sort Following by Popular or Recent
+- `R` — refresh the feed; new tweets come in at the top
+- `→` — point the arrows at the open tweet's text when it does not fit the pane, then at the replies, on the first one
 - `←` — point the arrows back at the feed, or leave the open tweet when the feed already has them
-- `↓` / `↑` — move the selection in whichever list the arrows point at
+- `↓` / `↑` — move the selection in whichever list the arrows point at, or scroll the text when they point at it
 - `Shift+↓` / `Shift+↑` — move through the replies without leaving the feed selection, and up onto the card the tweet replies to
 - `Shift+→` — open the selected reply or replied-to card, or the quoted tweet when nothing is selected (a click on the card does the same)
 - `Shift+←` — go back to the tweet you came from
 - `Ctrl+S` / `Ctrl+W` — scroll the open tweet's text down / up when it is longer than the pane
 - `Enter` — load the next page of replies for the open tweet
-- `p` — enlarge the open tweet's photo (click a photo does the same; `p`, `Esc`, `Enter` or a click closes it)
+- `p` — enlarge the open tweet's photo, or the article picture on the screen (click a picture does the same; `p`, `Esc`, `Enter` or a click closes it)
 - `v` — hand the open tweet's video to your system player
 - `o` — open the open tweet in your browser
+- `l` — like the open tweet, or take the like back
 - `r` — reply to the open tweet; type, then `Enter` sends and `Esc` closes
 - `q` — quit
 
@@ -90,6 +92,16 @@ The detail pane opens a tweet the way x.com does: a circular author avatar with 
 
 The replies load on their own. Rest on a tweet for a moment and its first page of replies arrives without a keystroke, so `j` and `k` can run down the feed without firing a request for every tweet they pass. Each tweet is asked once. `Enter` fetches the next page, and it is also how you retry a page that failed.
 
+X answers a tweet detail with more than the conversation. It pads a thin thread with unrelated tweets under a "Discover more" header and injects ads between the replies. Only `tweet-` and `conversationthread-` entries are replies, so the extraction keeps those and drops the rest.
+
+The home feed gets the same treatment. X sends a reply from somebody you follow as a `home-conversation-` module holding the tweet that was answered and then the answer, which x.com draws as one connected column. As separate cards they read as the same conversation twice, so the feed keeps the tweet the thread starts from and leaves the replies to the detail pane. `promoted-tweet-` entries are ads and never reach the feed. On a live page that turns 109 cards into 78.
+
+The "Sort by" menu x.com shows on its Following tab is a single GraphQL variable, `enableRanking` on `HomeLatestTimeline`: `true` is Popular, `false` is Recent, and a request that omits it behaves as Recent. `s` toggles it. The two sorts really are different feeds — one live pair came back as 31 tweets against 69, sharing four of them — so the keystroke drops the loaded page and its cursor and starts again at page one, rather than paging on with a cursor that indexes the old order. For You is a different operation with no such menu and never carries the variable.
+
+A page of the home feed carries two cursors and they point opposite ways. The top one asks for what arrived since that page was drawn, and it comes back empty when nothing has; the bottom one asks for the next page down. `R` sends the top cursor and puts what it gets above the page you already have, which is where new tweets belong, and then puts the selection on the newest of them. The older pages need no key: the feed sends the bottom cursor on its own once the selection comes within five cards of the end, so `j` keeps running. Each cursor moves only on the fetch that matches its direction, because a page pulled from the bottom names its own top rather than the newest tweet, and taking that top would make the next `R` skip backwards over everything in between.
+
+The feed keeps the order X sends and never re-sorts it. That order is not the tweet timestamps: a repost carries the original tweet's time, a `home-conversation-` module is placed by the reply that surfaced it while the card shows the thread root, and the ranked sort orders by relevance outright. On one live Recent page, 14 of 78 cards ran backwards in time by that measure, the largest step being about 26 hours. Sorting by the timestamps we hold would move those cards away from where x.com puts them, so the fetch direction is the only thing that decides where a tweet lands.
+
 The replies render as the same bordered cards as the timeline, each with the reply author's circular avatar, name, handle, text and its own reply, repost and like counts. `→` points the arrow keys at the reply list and lands on the first card, `↓` and `↑` then walk it, and `←` points them back at the feed. `Shift+↓` and `Shift+↑` do the same walk from the feed, without giving up the arrows. The list scrolls when the selection passes the last visible card. `Shift+→` opens the selected reply in the detail pane, so its own replies, photo and `o` shortcut then act on it. A click on a reply card opens it directly.
 
 When the open tweet answers another tweet, the detail pane draws that tweet as a `↩ Replying to` card above the author row, the way x.com shows the post a reply belongs to. The card is a selection target of its own: `Shift+↑` picks it from the top of the reply list, `Shift+→` opens it, and a click does the same. The card only appears once the answered tweet is already loaded, which is always true after you drill into a reply. X answers a tweet detail with the whole thread, so the tweets above the open one arrive with its replies; they feed the parent card and stay out of the reply list.
@@ -98,15 +110,39 @@ A quoted tweet renders as its own bordered card in the detail pane, with the quo
 
 A repost shows the tweet somebody reposted, not the repost itself. X serves a repost as a wrapper whose own text stops at 140 characters and which carries no media and no replies, so the TUI unwraps it and renders the original. The card and the detail pane name the person who reposted it: `↻ Some One · ` in front of the author on the card, and `@handle  ·  ↻ Some One reposted` under the name in the detail pane.
 
+An article is a long post published on x.com rather than a tweet, and the home feed sends it as its title alone: one live card carried 40 characters where the article ran to 3954. Only the tweet detail carries the body, so the reply fetch that fires when you rest on a card now also hands back the tweet you are resting on, and that fuller copy replaces the feed copy in place. Both the card and the detail pane mark it with `▤ article · ` in front of the author, because a title with no body otherwise reads as an ordinary short tweet. The badge goes in front rather than at the end, since a card line is narrow and loses its end to truncation first.
+
+An article also claims every row the detail pane can spare above one reply card, instead of the 12 a long tweet gets, and it earns a stop of its own on the way right: `→` gives the arrows to the text, `↑` and `↓` then scroll it a line at a time, and the cut edges name those keys instead of `Ctrl+W` and `Ctrl+S`. The next `→` moves on to the replies and `←` returns to the feed. `Ctrl+S` and `Ctrl+W` still page the text from anywhere, and `j`/`k` still leave for the feed. Only a text that overflows the pane becomes a stop, so a short tweet keeps the old walk where `→` lands straight on the replies.
+
+An article body arrives as a Draft.js document, not as a run of text, and the images live in it: an atomic block names an entity, the entity names a media id, and the media list resolves the original file. X does send a flat `plain_text` copy of the same article, but it is a stale snapshot that carries no images at all, and one live article had 32 blocks against 28 lines there, so the blocks are what reaches the screen. The pane draws the pictures where the author put them, cover image first, with the caption underneath as its own line and the headings and bullets kept. The body is therefore a column of text rows and picture boxes that scrolls as one, and a picture costs the rows it draws on: the `▾ 47 more below · ↓` marker counts those rows too.
+
+A picture takes at most half the body, and never more than 10 rows, because the window only draws a picture that fits in the rows it has left. A taller one would sit out every scroll position but its own and leave a blank foot in its place. Click a picture, or press `p`, to open it full screen; `p` picks the topmost picture on the screen, so scroll to the one you want first. The caption row under the body counts them and names the key: `3 images in the article  ·  click one, or p enlarges the one on screen`.
+
 A video renders as its poster frame, because a terminal cannot play the mp4. The caption under it states the size, the length and the key: `video 1920×1080 · 22:02 · v plays it`. Press `v` to hand the highest-bitrate mp4 to your system player.
 
-## Replying
+## Replying and liking
 
 Press `r` on the open tweet. The composer opens across the bottom, names the handle you are answering, and counts the draft against the 280-character limit as you type. `Enter` sends it, `Esc` throws it away. A draft over the limit is refused locally, so the text stays in the box instead of dying on a round trip.
 
+The drawer wraps and grows a row at a time as the draft passes the width, up to eight rows, which holds a full 280 characters down to a 40-column window. Past that the head of the draft scrolls out of sight rather than the foot, because the foot is where you are typing. A refusal from X is printed under the draft in the same drawer.
+
 The status line then carries the new tweet's id. A refusal is reported verbatim from X, with the error code and the path of the debug log.
 
-X's automation check is the one thing that can break this without warning. If replies start coming back with `error 226`, X has tightened the heuristic; the fix is in `HeaderBuilder.baseHeaders` in `src/twitter/headers.ts`, which is the single place the browser fingerprint headers are set.
+X sometimes refuses a write with error 344 and the message "You have reached your daily limit for sending Tweets and messages". The message is not true. One live burst refused the same reply five times and passed on the sixth, eight seconds later, on an account that had posted four replies that day against a cap in the thousands. 344 is a per-request guard, in the same family as 226, and X names a quota instead of the real reason. So a write refused with 344 is sent again on its own, after 1s, then 2.5s, then 6s: four attempts in all. A refused `CreateTweet` posts nothing, so no retry can double post. The status line says what the TUI is doing (`X refused the reply (code 344); retry 2 of 3 in 2.5s`) rather than repeat a reason that would send you to check a quota that is fine. Every refusal and every retry goes to the debug log.
+
+Error 226 is the other refusal, and it is a different animal. It means the automation gate shut, not that one request looked wrong. One live block wrote 24 refusals into the debug log over five minutes: three bursts of hand retries, roughly one attempt a second, every one of them signed with a fresh transaction id and every one of them refused. Fast retries only hold the gate shut. So 226 gets its own ladder, which starts above that whole burst and doubles from there: 5s, 15s, 30s, 60s, 120s, six attempts across 230 seconds. Each code counts its own attempts, because a run can start on 344 and end on 226. When the last delay is spent the composer keeps the draft, and the screen says the gate opens again after a few quiet minutes rather than inviting another press of `Enter`.
+
+`l` likes the open tweet and `l` again takes the like back. It is one GraphQL mutation each way, `FavoriteTweet` and `UnfavoriteTweet`, both answering with the string `"Done"`. The card moves first and the request follows, so the heart fills the moment you press the key; a refusal puts the count and the heart back where they were and reports the reason. X answers a second like on the same tweet with error 139, which only means the like is already there, so that counts as success. One tweet takes one call at a time, or a fast double press would race itself.
+
+X's automation check is the one thing that can break this without warning. A run of `error 226` that the ladder cannot outwait means one of two things. Either the gate is shut on the account for a while, which quiet time clears, or X tightened the heuristic and the headers no longer pass. The debug log tells them apart: `twitter.createTweet.refused` records `transactionIdSent`, so a false value points at the fingerprint. The fix for that is in `HeaderBuilder.baseHeaders` in `src/twitter/headers.ts`, which is the single place the browser fingerprint headers are set.
+
+One header is built per request rather than in `HeaderBuilder`: `x-client-transaction-id`. `src/twitter/transactionId.ts` derives it the way the x.com bundle does, because its value covers the request path and method. The bundle reads a 48-byte key from the `twitter-site-verification` meta tag of the signed-in shell, plays one of four hidden SVG loading animations at a frame the key picks, reads the resulting CSS `color` and `transform` back, and hashes that together with the path, the method and a timestamp counted from 2023-05-01. The result is 70 bytes, XOR-masked with a random first byte and base64-encoded. `PageContextStore` fetches the shell once per session and holds it, the way a browser tab holds one page load.
+
+Two details of that animation are Chrome behaviour, not CSS behaviour, and both change the answer: Blink prints matrix components with C's `%.6g`, so `3.41315e-05` where JavaScript prints `0.0000341315`, and its cubic-bezier solver is an 11-entry sample table, not an exact solve. `tests/transactionId.test.ts` replays 81 ids captured from the real in-page generator; they all have to match byte for byte.
+
+The generator fails open. A shell that cannot be parsed means the header is omitted and the request still goes out, because reads worked without it before this existed. Every miss lands in the debug log as `twitter.transactionId.noPageContext` or `twitter.transactionId.failed`. A refused write drops the cached page data, since a rotated key is one of the few things that can make an otherwise good request look wrong.
+
+Measured against the live API, error 226 does not track this header: a fabricated value, a captured value and no value at all all got past it. Treat the header as one input to a heuristic that also weighs the TLS fingerprint, the header order and the account history. Because the check is a heuristic, repeated refused writes make X stricter for a while. When you are testing this path, pace the attempts and expect a cooldown after a burst.
 
 Click a photo, or press `p`, to open it in a full-screen lightbox. The lightbox replaces the feed and detail panes, so the photo gets the whole window instead of the few rows the detail pane can spare. Click it again, or press `p`, `Esc` or `Enter`, to close it.
 
@@ -153,6 +189,7 @@ Implemented:
 - inline kitty-graphics rendering: circular author avatars on every tweet card, full photo in the detail pane
 - nested quoted-tweet card in the detail pane, with the quoted author's avatar and photo
 - click-to-enlarge photo lightbox that takes over the window
+- articles rendered from their Draft.js body: the inline images in the author's own order, headings, bullets, a `▤ article` badge, and a click or `p` to enlarge a picture
 - drill into a quoted tweet by click or `Shift+→`, and back out with `Shift+←`
 - replies fetched automatically for the tweet under the cursor, one request per tweet, `Enter` for the next page
 - reply cards with avatars and counts in the detail pane, `→`/`←` to move the arrow keys between the feed and the list, `Shift+→` to open one
@@ -160,7 +197,10 @@ Implemented:
 - x.com-style detail pane: author avatar block, full wrapped text with `Ctrl+S`/`Ctrl+W` scrolling, bottom metrics bar
 - chafa media preview helper + external open/copy helpers
 - normalized state reducer/store helpers
-- mocked tests for config import, auth headers, extraction, timelines, replies, the cookie write path and its refusal codes, OAuth flow, media helpers
+- `l` to like or unlike the open tweet, drawn as a filled `♥` on the count, applied optimistically and rolled back on refusal
+- `R` refreshes from the top cursor and prepends what is new, while the older pages page in from the bottom cursor on their own as the selection nears the end
+- automatic retry with backoff on X's transient write refusal (error 344) and on its automation gate (error 226, up to 5 retries over 230s), for both replies and likes
+- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, the cookie write path and its refusal codes, OAuth flow, media helpers
 
 Live X GraphQL endpoints can still break when operation IDs or response shapes change; query ID refresh and tests are set up to make those failures visible. Replies additionally depend on X's automation heuristic, which X can tighten at any time.
 

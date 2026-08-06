@@ -1,0 +1,497 @@
+{
+  "note": "Genuine x.com generator output. The keys are synthetic random bytes injected into the page, not a real page token.",
+  "animSvgs": [
+    "<svg viewBox=\"0 0 24 24\" id=\"loading-x-anim-0\" aria-hidden=\"true\" class=\"r-1p0dtai r-13gxpu9 r-4qtqp9 r-yyyyoo r-wy61xf r-1d2f490 r-lx7ay r-ywje51 r-dnmrzs r-u8s1d r-zchlnj r-1plcrui r-ipm5af r-lrvibr r-1blnp2b\"><g><path d=\"M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z\"></path><path d=\"M 10,30 C 136,204 107,84 159,195 h 202 s 204,19 134,21 C 230,83 125,109 129,123 h 242 s 3,208 161,94 C 61,51 204,90 171,133 h 78 s 18,19 240,120 C 232,41 224,184 37,182 h 186 s 47,234 131,86 C 133,55 167,81 33,159 h 230 s 221,168 40,247 C 217,199 119,174 68,190 h 212 s 202,188 159,182 C 19,124 210,226 85,38 h 243 s 63,130 87,139 C 179,211 150,35 58,206 h 64 s 248,117 155,229 C 66,229 112,225 55,5 h 189 s 31,238 144,194 C 36,169 46,232 0,124 h 177 s 40,44 61,63 C 62,75 127,47 22,162 h 90 s 235,179 244,110 C 186,193 151,19 48,138 h 102 s 203,207 78,102 C 9,119 2,221 101,251 h 119 s 220,35 17,183 C 144,93 136,48 233,65 h 76 s 183,136 183,73 C 99,12 139,91 170,152 h 157 s 202,193 122,105 C 155,14 121,140 67,252 h 42 s 81,138 51,161\" fill=\"#1d9bf008\"></path></g></svg>",
+    "<svg viewBox=\"0 0 24 24\" id=\"loading-x-anim-1\" aria-hidden=\"true\" class=\"r-1p0dtai r-13gxpu9 r-4qtqp9 r-yyyyoo r-wy61xf r-1d2f490 r-lx7ay r-ywje51 r-dnmrzs r-u8s1d r-zchlnj r-1plcrui r-ipm5af r-lrvibr r-1blnp2b\"><g><path d=\"M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z\"></path><path d=\"M 10,30 C 49,22 123,223 31,139 h 71 s 37,88 113,194 C 76,23 2,223 153,249 h 96 s 5,20 91,87 C 245,70 190,131 202,30 h 75 s 249,188 140,36 C 25,125 226,70 6,243 h 186 s 30,127 101,134 C 25,165 240,191 184,36 h 49 s 13,64 64,218 C 195,142 149,235 34,121 h 213 s 190,100 33,180 C 177,142 205,56 79,30 h 101 s 168,14 128,0 C 83,86 144,90 38,104 h 123 s 231,214 20,186 C 193,122 41,183 138,15 h 113 s 134,219 59,74 C 125,137 119,241 206,166 h 121 s 15,121 135,164 C 213,122 54,215 53,34 h 233 s 227,62 157,157 C 106,52 202,103 219,61 h 104 s 157,135 215,238 C 45,231 34,232 117,94 h 177 s 246,98 38,220 C 40,197 151,12 160,165 h 60 s 184,211 254,49 C 83,119 148,40 142,141 h 114 s 59,2 33,65 C 10,117 115,173 183,32 h 142 s 174,91 242,158\" fill=\"#1d9bf008\"></path></g></svg>",
+    "<svg viewBox=\"0 0 24 24\" id=\"loading-x-anim-2\" aria-hidden=\"true\" class=\"r-1p0dtai r-13gxpu9 r-4qtqp9 r-yyyyoo r-wy61xf r-1d2f490 r-lx7ay r-ywje51 r-dnmrzs r-u8s1d r-zchlnj r-1plcrui r-ipm5af r-lrvibr r-1blnp2b\"><g><path d=\"M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z\"></path><path d=\"M 10,30 C 86,112 29,22 82,247 h 178 s 85,79 44,18 C 108,133 161,96 17,22 h 176 s 167,8 91,11 C 107,173 53,255 81,190 h 31 s 213,232 12,94 C 203,141 107,9 211,211 h 10 s 58,23 216,96 C 133,105 61,202 251,126 h 185 s 71,230 160,118 C 37,22 189,157 83,0 h 85 s 166,162 98,226 C 98,253 34,88 242,224 h 76 s 195,19 108,161 C 202,223 2,189 53,87 h 7 s 128,46 252,17 C 213,112 230,223 196,237 h 226 s 243,186 227,87 C 72,160 116,66 230,4 h 93 s 42,78 175,98 C 87,223 101,21 251,183 h 226 s 35,13 24,182 C 39,96 14,187 103,78 h 53 s 148,117 183,42 C 16,94 9,119 117,97 h 193 s 109,166 190,210 C 6,0 9,211 111,183 h 27 s 5,158 173,58 C 47,238 129,45 50,47 h 244 s 229,235 182,213 C 242,102 121,55 174,24 h 254 s 155,60 176,96\" fill=\"#1d9bf008\"></path></g></svg>",
+    "<svg viewBox=\"0 0 24 24\" id=\"loading-x-anim-3\" aria-hidden=\"true\" class=\"r-1p0dtai r-13gxpu9 r-4qtqp9 r-yyyyoo r-wy61xf r-1d2f490 r-lx7ay r-ywje51 r-dnmrzs r-u8s1d r-zchlnj r-1plcrui r-ipm5af r-lrvibr r-1blnp2b\"><g><path d=\"M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z\"></path><path d=\"M 10,30 C 15,243 223,150 3,64 h 42 s 123,18 70,235 C 142,31 76,17 119,23 h 195 s 21,21 189,171 C 0,149 88,85 83,12 h 206 s 111,30 245,33 C 61,235 182,175 194,238 h 54 s 163,66 150,108 C 53,164 69,249 72,208 h 7 s 245,103 241,105 C 242,141 57,94 226,192 h 252 s 22,245 255,160 C 124,162 32,157 91,16 h 180 s 246,170 89,3 C 189,227 140,233 103,152 h 250 s 230,134 54,193 C 76,150 154,162 248,224 h 187 s 101,81 138,31 C 208,63 123,120 59,67 h 196 s 201,56 102,48 C 86,226 58,9 144,195 h 125 s 192,104 141,21 C 175,58 97,214 128,56 h 49 s 127,210 8,252 C 99,83 54,52 251,202 h 166 s 221,80 11,171 C 143,47 150,26 137,84 h 255 s 189,46 55,123 C 145,255 83,221 4,171 h 188 s 99,71 211,83 C 141,155 121,188 140,183 h 229 s 205,229 47,127\" fill=\"#1d9bf008\"></path></g></svg>"
+  ],
+  "cases": [
+    {
+      "verificationKey": "+EhTnlYATwBBwKkRGRp80zWd3uTt9evwkATP8FIq7+mLuoVLWDyTjqJBJhHhKiQ3",
+      "path": "/1.1/jot/client_event.json",
+      "method": "GET",
+      "id": "r1fn/DH5r+Cv7m8Gvra103yaMnFLQlpEXz+rYF/9hUBGJBUq5PeTPCEN7om+ToWLmLWhiqk4CvE9Dy0Su5/ypZYZaJVLrA"
+    },
+    {
+      "verificationKey": "WtEzpGcA5gG/xCwzcCBJePlKDEoI4qhnrFj/KUTdqDLOy+dr8oSi8eZymVRryXP5",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "DlTfPappDugPscoiPX4uR3b3RAJEBuymaaJW8SdK06Y8wMXpZfyKrP/ofJdaZcd99xQAKwhh5lOC8qZ1f5oiMwgZql9mDQ"
+    },
+    {
+      "verificationKey": "QBOglEgApgK0yggtFjiacRD3oIYXGrxwI+Pe5uASJr+oN6jgP7zQaibwR4vaiROx",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "Tw9c79sHT+lN+4VHYll31T5fuO/JWFXzP2yskamvXWnw53jnr3DznyVpvwjElcZc/lVBaklNB5ht5jESFww07FD0QvAATA"
+    },
+    {
+      "verificationKey": "wP9LCA8APwPAyJb/SAnhtuAvFkjUDN3iUMJLmPlZlL4wYCU7ZlKl4haMdjZDmu/9",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "HNzjVxQTHCMf3NSK41QV/ar8MwpUyBDB/kzeV4TlRYiiLHw5J3pOuf4KkGoqX4bz4QYSORpnKikH9dw6BpH6M0QLsb69Hw"
+    },
+    {
+      "verificationKey": "R3A7+i4APQQBowYVJVBeT5R6AReSJLQYbHY51MmdYq1vJrxhmT+06f14b4xiNst3",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "4aaR2hvP4dzl4ELn9MSxv651m+D2c8VV+Y2X2DUofINMjsddgHjeVQgcmY5tg9cqlvvvxOf0vZmxA1b2APVfS4spB5Rw4g"
+    },
+    {
+      "verificationKey": "4jb19kgAwAXOQimDC1StI/vyXxKyiOj2/d3HTmuYan7R65EtiH8RfxFeTkthRQ6m",
+      "path": "/1.1/jot/client_event.json",
+      "method": "POST",
+      "id": "s1GFRkX7s3O2ffGaMLjnHpBIQeyhATtbRU5udP3YK9nNYlginjvMosyi7f340va9Fam9lrV9vZSW93MzTFWeIYdWsAIysA"
+    },
+    {
+      "verificationKey": "W363jMUArgbx28+TIJScHlaWVkUktl4Ra5GIWWjeKc4pxjE+fefIrBLwkDgeZLe7",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "p/zZECtipwmhVnxoNIczO7nxMfHigxH5tsw2L/7PeY5pjmGWmdpAbwu1VzefucMQHL2pgqHuD55nweGBVibrozWDznWSpA"
+    },
+    {
+      "verificationKey": "McnKNbAAMQfPn7JwYVXVAi5ezvlqi30Q480Ox3oTIuaSszFF4OPOSHEq7O9TsaSF",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "CDnBwj24CDkPx5e6eGld3QomVsbxYoN1GOvFBs9yGyrumrs5TejrxkB5IuTnW7msjRIGLQ6194yxPjHxjfx6AfQfeZ6WCw"
+    },
+    {
+      "verificationKey": "L9RBs/4AvgiqulXJROKlc3IVgkODgW9mKmFMoPU3kqFdeogf70H0PjGyJ+GV9yAK",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "VXqBFOarVetd/+8AnBG38CYnQNcW1tQ6M380GfWgYsf0CC/dSroUoWtk53K0wKJ1X09bcFP8Ji3N1gUNtMOoeYcEF7gJVg"
+    },
+    {
+      "verificationKey": "XQJfGcAAdwnLGB+GqKWOrI8zXhNO/oaXBepc+usYATPoNylKDW1SigIYjHS0XAXv",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "1YjXiswV1aLcHs3KU31wW3la5ovGmytTQtA/iS8+zdTmPeL8n9i4h1/XzVmhYYnQOs/b8NM0G2MrKkndoyKemHavE4vx1g"
+    },
+    {
+      "verificationKey": "gHBdcqIAvQqLaxStMI4ZyVSi/2Rw14RAjLSUG8Uz0+IXzo6awsQF0z9WKY00PWjg",
+      "path": "/1.1/jot/client_event.json",
+      "method": "POST",
+      "id": "YeERPBPDYdxr6gp1zFHveKg1w54FEbblIe3V9XqkUrKDdq/v+6OlZLJeN0jsVVwJgXpvRGemtrFC8aN+BgCLHUHYVmsNYg"
+    },
+    {
+      "verificationKey": "LUp4hL4ASQsNFWmmRL6Zy7KHlgL/I+R7CtnC6pHVgqvoFEMHS1XxL6WvB62zEdJE",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "sJ36yDQOsPm7vaXZFvQOKXsCNyayT5NUy7ppclohZTIbWKTzt/vlQZ8VH7cdA6Fi9Ku+lbbsQOF5il4Mqz3SaAnle1LDsw"
+    },
+    {
+      "verificationKey": "drvQHuUAWQwezG2nE8rKaoT5hvaNpU4snRc9lwHHedbbra6hpgyHBKiIw6GKw35T",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "r9kUf7FKr/ajsWPCCLxlZcUrVilZIgrhgzK4kjiuaNZ5dAIBDgmjKKsHJ2wOJWzR/LShiqkxqtQRIbcg03i8rieL+XW+rA"
+    },
+    {
+      "verificationKey": "E87qFIYAAA0YM4vHf2s+9HnVjYvXiLPPVIsEfayepWoQx/S0tUsfGZs0dE7dQGu1",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "YHOuinTmYGBteFPrpx8LXpQZte3rt+jTrzTrZB3M/sUKcKeU1NUrf3n7VBQuvSAL1XtuRWYKHEkLz62XGysjBNOKa4stYw"
+    },
+    {
+      "verificationKey": "9zm8SwoAVw7SEiqD83cf5iCHWudCIcqLFUMG/ShQJi5qF5WLB7JjITt5ogzFy6DI",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "1yDua5zd14DZBcX9VCSgyDH3UI0wlfYdXMKU0Sr/h/H5vcBCXNBltPbsrnXbEhx3H8zZ8tEg/YIlE8FV8m8ldtrR9eFs1A"
+    },
+    {
+      "verificationKey": "jv4CSDMAkw91Y+lSNxuuzhOgyem7QsNFLk7Ge7Dz3qdhd8WGh16PpUOg+cuaUumb",
+      "path": "/1.1/jot/client_event.json",
+      "method": "GET",
+      "id": "KqTUKGIZKrklX0nDeB0xhOQ5iuPDkWjpbwRk7FGa2fSNS13vrK10pY9pitPhsHjDsTEkDyz99pbWpi0gT0NHDBzX3F6IKQ"
+    },
+    {
+      "verificationKey": "WnIHVFcB4ADenVbgAvwXWT9XnjpYKpuuBaM7NrMkVzw0KSDTNxqGfurPzAb5Lggx",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "5L6W47Cz5QTkOnmyBOYY873bs3revM5/SuFH39JXwLPY0M3EN9P+YpoOKyjiHcrs1f/qweLmZZv4Ica0MEh3w7Xl1TE85w"
+    },
+    {
+      "verificationKey": "i5zpUuwBAQHvHXJpNiiIhJT9kwqZcBY6ad1TmIp5jHhJrWfZOzUQGbC4PyoE038D",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "BI+Y7VboBQUF6xl2bTIsjICQ+ZcOnXQSPm3ZV5yOfYh8Talj3T8xFB20vDsuANd7Bx8KIQKL52iuPJ7OMX2XLez93J3kBw"
+    },
+    {
+      "verificationKey": "ihSy8KgB/QIqR8v3dMvvmkRTELY3AMM2OYk6l0kyDxmHY6h+19YhJWSWH5DjRKbk",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "tjyiBEYet0u0nPF9QcJ9WSzy5aYAgbZ1gI8/jCH/hLmvMdUeyGFgl5PSIKkmVfIQUq24k7BLqUxlPmP4EOpRBKuUBwe4tQ"
+    },
+    {
+      "verificationKey": "TwONnWsBlQMCRWbhFJePtNx7BNYDCqGQOoiX4GaI3qY86v+vdMu6fpyOPl9xrllC",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "HlEdk4N1H4sdHFt4/wqJkarCZRrIHRS/jiSWif54lsC4IvThsWrVpGCCkCBBb7BHXAUQOxh2JmpTGlEPMWu9MMFuBPUvHQ"
+    },
+    {
+      "verificationKey": "7QlZ9GQBhQQAcYxo0EPziKntMQTxLYynalX0hHErq0LqjNsBOxW4drhjm700atVF",
+      "path": "/1.1/jot/client_event.json",
+      "method": "POST",
+      "id": "a4ZiMp8Pau5vaxrnA7somOPChlpvmkbnzAE+n+8aQMApgeewalB+0x3TCPDWXwG+LnBlTm0dALqYe2vK2OnziujMG2sJaA"
+    },
+    {
+      "verificationKey": "QVt4Z0oB5wWMCIj5TyOvFvwNvy59Yftmk/DQ3LascPdCQSdUMETb8tdMmY4mdfjl",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "RgcdPiEMR6FDyk7Ovwll6VC6S/loOye9INW2lprw6jaxBAdhEnYCnbSRCt/IYDO+o11IY0AqPOUrUPTYHHzoDg0AjRevRQ"
+    },
+    {
+      "verificationKey": "/YmZh0sBcAbUmu+EuZpYbZJ7HV0DFQSKAYxl70Ipp/cz70XPwPBYGPyoo7nWrKog",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "eYTw4P4yeAl/reOW/cDjIRTrAmQkemx983j1HJY7UN6OSpY8trmJIWGF0drAr9XTWWJ3XH+Z8Fu34OHkarUmmkLcj8LFeg"
+    },
+    {
+      "verificationKey": "LHbsM9ABawcPc/9OdBMWhkYSZ396c2qcoq0IUaso6sdHfZFLtqNDXIDVLxbULqye",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "8d2HHcIh8Jr2/oIOv4Xi53e345aOi4KbbVNc+aBa2Rs2toxgukdSsq1xJN7nJd9db+r/1PeIlhQhXXM6Jk8BG/6gdjoQ8g"
+    },
+    {
+      "verificationKey": "4MrRgNcB8giIXNlJP9mgH1k+iWemI6/txRrDo5UxQvCpoWBKoiRU6Ag/Rcn9Uu9q",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "IcHr8KH2INMpqX34aB74gT54H6hGhwKOzOQ74oK0EGPRiIBBa4MFdckpHmTo3HPOSzovBCcayATw9wOmjTpJlQZSD7FQIg"
+    },
+    {
+      "verificationKey": "X+v3pKsBXQkrqfR7hBZ8vo/5T6vGXTlX2KvLbdyaiMMVKH5R2oMP3CY3jREeM0Oe",
+      "path": "/1.1/jot/client_event.json",
+      "method": "POST",
+      "id": "7rEFGUpF77PnxUcalWr4klBhF6FFKLPXuTZFJYMydGYt+8aQvzRt4TLI2WP/8N2tcPXgy+jcUfU/3MEwxjjiwPUcRQ2p7Q"
+    },
+    {
+      "verificationKey": "9w5FcYcBtgpxD7n/bWhzhOdLERSe4/2yuzlnYgzW40MKvl/Rp2rnqS8Qf1dKKiBd",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "c4R9NgL0csV5AnzKjB4bAPeUOGJn7ZCOwchKFBF/pZAwec0sotQZlNpcYwwkOVlTLmh9VnU2nWcwpuXo/pEdHf03xXBMcA"
+    },
+    {
+      "verificationKey": "AuRvhJQBkwsPQaZUMJQRsajHXEzqcf+UT7SNeaokDUNO6OtwuDrGzGATDHxKseh0",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "a2mPBO//avhgZCrNP1v/etrDrDcngRqU/yTf5hLBT2YoJYOAG9NRracLeGcXIdqDH3BlTm0Ew3t6hyu0Oe6Ku0A/GpyDaA"
+    },
+    {
+      "verificationKey": "rH4f/woBNwzbz8YbPaoYafhYVNyv3HxxJx5vFvistErG4V0T8fS0FcvBduQb3qkC",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "OJRGJ8cyOQ804/f+IwWSIFHAYGzkl+RESR8mVy7AlIxy/tllK8nMjC3z+U7cI+aROiM2HT6HE2/gkUJiVHPQI7t+gDzbOw"
+    },
+    {
+      "verificationKey": "Y8L5XDYBww3ZqyXrcZT26ARpnNV5XfQRnQiIXXAZOZrHSqHsNC4UjN5YC0nh0V6D",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "Dm3M91I4D80D16Ur5X+a+OYKZ5Lbd1P6H5MGhlN+FzeUyUSv4jogGoLQVgVH799QjRUAKwj0nua2MspG1kJhw+AdJqVaDQ"
+    },
+    {
+      "verificationKey": "EUx18HcBSA591g1xiJJKej07QQFrWOHhdsqDRHDvgQAcvyUmxUXa0rYW3P0MtdDs",
+      "path": "/1.1/jot/client_event.json",
+      "method": "GET",
+      "id": "8OG8hQCH8bj+jSb9gXhiuorNy7Hxm6gREYY6c7SAH3Hw7E/V1jW1KiJG5iwN/EUgHOv+1fYnnwgp+0nOk9qX6wJ4/tpq8w"
+    },
+    {
+      "verificationKey": "CnRO+WQB4A+Z9W2MVSkreQEfxsSF3j8vD6ZXPVU3QGVRBLc42iLXL4iegiLj5ern",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "j4X7wXbrjm+AFnriA9qmpPaOkElLClGwoIAp2LLauM/q3os4t1WtWKAHEQ2tbGplaJSBqolXOA+Am8VT7jULh+6vV+rkjA"
+    },
+    {
+      "verificationKey": "ZBDQgb0CTQAFnyBC38iORFayO1uq0OCaS01kpIeuBZBe5oBKw251K4ZW+Ds/oFNB",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "7or+Pm9T7KPu63HOrDEmYKq4XNW1RD4OdKWjikppQOt+sAhupC2Am8VouBbV0U69r/Xgy+jsKAOWa/nZ9jo3bJM4Kc2Z7Q"
+    },
+    {
+      "verificationKey": "04xMBEgCjAFKC3aLtPRmVACRVvcEAwJXHzLfPwdLzniOvQAICGdTL7j/gKUumDnT",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "5TZpqeGt52nkr+6TblERg7HldLMS4ebnsvrXOtririuda1jl7e2CtspdGmVAy33cNv7rwOPg1QvKOwyIgjSrm+iW0mbv5g"
+    },
+    {
+      "verificationKey": "wPoQvhYCTQKzz2T6iFBOH2ANxLvGoDRpSi3EpVkbA4VsOJ85p+DINIrq3hX5pdbl",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "c7OJY81lcT5xwLwXifsjPWwTfrfItdNHGjlet9YqaHD2H0vsStSTu0f5ma1mitallmh9VnWJMTNlwjThjFhvPWHqkQYHcA"
+    },
+    {
+      "verificationKey": "lUtYfKACrQPO2JWqMVopSeJb4XkO/3aAvWIR3gjP3yFW0oRXVfhKLCNLSa9CLt5r",
+      "path": "/1.1/jot/client_event.json",
+      "method": "POST",
+      "id": "NaB+bUmVN5g2++2gnwRvHHzXbtRMO8pDtYhXJOs9+uoUY+exYmDNfxkWfnyadxvrXi47EDNJpLfuq9gXwY9PVtaj1z5RNg"
+    },
+    {
+      "verificationKey": "pwmly6QC9ATIJsRUux6kvP0bofJWqQxWHhOWIn3VEGnMKOWtpzTt04MLZjIZl2Nj",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "TulH64XqTLpKhmiKGvVQ6vKzVe+8GOdCGFBd2Gwzm14ngmar4+l6o53NRSh8V9ktLVVAa0hYMDQ22kl5ht4HI7oUrTYZTQ"
+    },
+    {
+      "verificationKey": "VY2C/4MC2wVHAUEhrvFNr6xHUhj1xgvZHi9bdZJHUwcQnJSQWcCn9QW6ONQ/rWAU",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "TRjAz7LOT5ZICkwMbOO8AOLhCh9VuItGlFNiFjjfCh5KXdHZ3RSN6rhI93WZcuAtWVZDaEt2psPizv2LMH95BVybfuHuTg"
+    },
+    {
+      "verificationKey": "lxFh57sCMgb+tD+LEofc0+zEUFu83b1lm15IMqv4tJHlkR8wHKfEScYdES1x+LW4",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "VsFHN7HtVGRQqOJp3UTRioW6kgYN6ovrM80IHmT9ruLHs8dJZkrxkh+QS0d7J67j7k1Yc1DCEGwS2lnFRGQ0GA54KZPTVQ"
+    },
+    {
+      "verificationKey": "G40cdCIC5gfiG1TcrAyBe0dbGQtmP9cMCgCxA1UhmJr3LNsV1CKagFs5RlyKmsn0",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "IjmvPlYAIMQlwDl2/o4uo1lleTspRB31LigikyF3A7q41Q75N/YAuKJ5G2R+qLjr1jksByQT3lVf+YB65Dp6wMDFlGrmIQ"
+    },
+    {
+      "verificationKey": "53VwTg4C2wiQjea8ZTEisXWyEf6wO5mBtQOLEF1b7hi26ATrPf0IUp8/BGUcrEg3",
+      "path": "/1.1/jot/client_event.json",
+      "method": "POST",
+      "id": "ao0fGiRkaLFi+ueM1g9bSNsf2HuU2lHz699p4Xo3MYRy3IJugVeXYjj1VW4PdsYiXXFkT2x5lzB7/cqMWLsXUZJnRUG0aQ"
+    },
+    {
+      "verificationKey": "7aGhfo4CQwkjPkeVuOfjttwn3yfFjSyF/iPqtu24WW/x9yeFkJ8tW0MeFjYNdbH0",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "jmMvL/AAjM2HrbDJGzZpbThSqVGpSwOiC3CtZDhjNtfhf3mpCx4Ro9XNkJi4g/s/epWAq4iskaAx/Zdmspt5vsCf/vTijQ"
+    },
+    {
+      "verificationKey": "Pr+2f3ICGAocpp5b58bM9WsACy/dC5IrifuKpvG7SKMSKTa+dJZKPFEzlnbQw+/m",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "xvh5cLm0xN7M2mBYnSEACjOtxs3pG81U7U89TGA3fY5l1O/weLJQjPqX9VCwFgUpIN3I48AFh5fvwhYCWB8T0DSYTLfpxQ"
+    },
+    {
+      "verificationKey": "dhEBasYCWAsDGp5ufVJRPKXMSiBSdLR7fpvZf3clAa7RBqWRcy4AL/i5S1/v+U/0",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "ptC3p8xgpP6tpbw4yNv095oDauyG9NIS3dg9f9nRg6cId6ADN9WIpoleH+35SV/pUr2og6CYhkAbZ0D/ZCaz2AiOlibmpQ"
+    },
+    {
+      "verificationKey": "t+OO4hMCIwzhMAJeiIsUrAoaaUSmSVaLfazC4fzflcwnyNNGuAnHZPciEdYYxWNX",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "Sv2pxKhZSGlGq3pIFMLBXuZAUCMO7AMcwTfmiKu2ld+GbYKZDPJDjS69aFucUo8pHVFEb0z3/hMi/M4Lr3orZUQTH6JrSQ"
+    },
+    {
+      "verificationKey": "yop9XfQCpg0hs2PMpVU1d3k51dOmvG6LXsGSRi1jeBInrW5c/2xs7YDQPIBLl9u5",
+      "path": "/1.1/jot/client_event.json",
+      "method": "GET",
+      "id": "AsiIf1/2AKQPI7FhzqdXN3V7O9fRpL5siVzDkEQvYXoQJa9sXv1ubu+C0j6CSZXZuxkMJwT7QfaegTKsgtuiU2k/xSRGAQ"
+    },
+    {
+      "verificationKey": "rxHOdD0C/A5hjFJSQghdDe/qGt9kIGBq4azmBOiBafaFc8+jkmMdi3wDaHWwrzGc",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "bcJ8oxlQb5FjDOE/Py9lMGCCh3eyCU0NB4zBi2mF7ASb6B6izv8OcOYRbgUY3cJc8XZjSGuXkZqCyooAz1EgVzeJkUdtbg"
+    },
+    {
+      "verificationKey": "bTUzgnMCMw+riV+Em0szbfvyYeX5BtvOwdmVI2xRJhltkbdQodQR/9C7lTz//ytS",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "DGE5P45/Dj8Dp4VTiJdHP2H3/m3p9QrXws3VmS9gXSoVYZ27XK3YHfPct5kw8/MnXhcCKQqNrVWkR+2aSC4zruUNs7WsDw"
+    },
+    {
+      "verificationKey": "HqonNmEDJAAoy58/ei8Hyebt0q+aKoOQQALN+FhIXfH2et9MVjqWeVZ/byTWnRvS",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "/uBU2cif/dr+1jVhwYTR+TcYEyxRZNR9br78MwamtqMPCIQhsqjEaIeogZHaKGPlLOXw2/iMfeYWFx4189iHAhoE/GP6/Q"
+    },
+    {
+      "verificationKey": "Q31ttzQDywHaJxt3ZXzg7tbm96uY0HpNwXFn8c0Yn025beB4jG3BUmvbEfNkTNZO",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "46CejlTX4CjiOcT4lIafAw01BRRIezOZriKShBIu+3yuWo4Dm2+OIrGIOPIQh681rfjtxuXn8aX4X0f/avGFA58vaIv74A"
+    },
+    {
+      "verificationKey": "raSeDXsDdAIEAmTwQlCWzw8ybTlXkv+2f94JTte724zYygvglUf7VuOu07UCxFsX",
+      "path": "/1.1/jot/client_event.json",
+      "method": "POST",
+      "id": "9VhRa/iO9oH38feRBbelYzr6x5jMomcKQ4or/LsiTi55LT/+FWCyDqMWWyZA9zGu4u770PPzMJq3meN8c9mNsLGezNwK9g"
+    },
+    {
+      "verificationKey": "xSIt8P4DbgNgjjJ1ls0R1xWnnOVRItVcwjVSR5XOlU0AFzNH28CXmy3+JNr1NGFJ",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "3xr98i8h3LHcv1HtqkkSzgjKeEM6jv0Kgx3qjZhKEUqS38jsmAQfSETyIfsFKuu+lsTR+tmBDAe+mNLI8/U8iNYC1k1i3A"
+    },
+    {
+      "verificationKey": "ULjL5noDZQQ29kj2BaQJFUY1BNZqBDb9+zb3zZXMExxKCRLv6miKmz4YE1Woh0jd",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "AVG5yud7AmQFN/dJ9wSlCBRHNAXXawU3/Po39syUzRIdSwgT7utpi5o/GRJUqYZJ3BoPJAeQEz7LbmGH0iF83yhYmyBfAg"
+    },
+    {
+      "verificationKey": "b34RDx8DsAXLVkryjeDq98Tr9t3CfwyNtyNfYOUZHr6s4L42glrTZCQe0YMhtU//",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "OFdGKTcnO4g9825yyrXY0s/8087l+kc0tY8bZ1jdISaGlNiGDrpi61wcJum7GY13xyM2HT4BjocuI5MMtGoA995XBs+YOw"
+    },
+    {
+      "verificationKey": "uk9BYB0DtAaBjI+hm8Bm+2eoN0P1WutZOXPMPNv/qlFOmAzlOeyBfZEcqjOdf4Vi",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "OoB1e1onOY48u7a1m6H6XMFdkg15z2DRYwNJ9gbhxZBrdKI23wPWu0erJpAJp0W/WCE0HzyJHU4Z5V0TbtWaqFtj1yjsOQ"
+    },
+    {
+      "verificationKey": "U2fb4X4DOgfhWb+HRSOrk+cVBH8x9b3mOUDa+7AHhML+fs0sqrQz9fq3i1g4ICIA",
+      "path": "/1.1/jot/client_event.json",
+      "method": "POST",
+      "id": "3o25BT+g3eTZP4dhWZv9dU05y9qh7ytjOOeeBCVu2VocIKAT8nRq7SskaVWG5v783sXQ+9gJjBhP5+SG28knqKCdO/s+3Q"
+    },
+    {
+      "verificationKey": "0VIfBg4DWwi8Gc1a27GiAWHlED8HXSz8MuY6jWbgK9r3eu4cofBFg8rlUnv4JEP2",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "DdxfEgsDDlYFsRTAV9a8rwxs6B0yClAh8T/rN4Br7SbX+nfjEaz9SI7H6F929SlO+xYDKAvfGP3n2L3iXLzbDhpAkr5ADg"
+    },
+    {
+      "verificationKey": "WLHHBkoDuwmZZ8tCnrkQlzeGGckUnONeHDMeiEvgcYEC55gyWpDj5dyPHioYHgm+",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "MGiB9zZ6M4s5qVf7cq6JIKcHtin5JKzTbiwDLrh70EGxMteoAmqg09Xsvy4aKC45jis+FTbgX6PoDCGr0m9AzBNcCdxBMw"
+    },
+    {
+      "verificationKey": "KNBZ5SQDqQrPhWNqMheOEXkajBiyTHFlIu4/eBpyCCHAcsqhZS/tU7NGfPwzLbm4",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "mLBIwX28mzGSVx378qqPFonhghSAKtTp/bp2p+CC6pC5WOpSOf23dcsr3uRkq7UhIIOWvZ5GxjYA2c17mB3IHepxG3S+mw"
+    },
+    {
+      "verificationKey": "gVo2qvUDhgv3fBlrBnmull52qjFKtYWGkNALIwhLry5TeOrBUj30KBrGfLFCP2qI",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "lhfMoDxjlRCdYeqP/ZDvOADI4Dyn3CMTEAZGnbWe3Tm4xe58V8SrYr6MUOon1Kn8Ho2Ys5Dt8YMxfmddp5GpnyGttb3DlQ"
+    },
+    {
+      "verificationKey": "woFAH0wDxwy/3B7DZNNqzcTY/FGDXVDjGo0q1kA+LPXCtB6/AJk2miS4jvi+61WD",
+      "path": "/1.1/jot/client_event.json",
+      "method": "GET",
+      "id": "3B5dnMOQ3xvQYwDCH7gPthEYBCCNX4GMP8ZR9gqc4vApHmjCY9xF6kb4ZFIkYjeJX8fS+doTHJwupVjbrN/pCB2Wy9gw3w"
+    },
+    {
+      "verificationKey": "T916EccDyA2P9ycQaD6kk+AAALTD5DHuR5tS4/9RFWhoATrkYSmL0a13FoeqyA8V",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "D0DSdR7IDMcCgPgoH2cxq5zvDw+7zOs+4UiUXezwXhpnZw41624mhN6ieBmIpccAGhQBKgmYkjuvsZBO7kgstNG8/kEqDA"
+    },
+    {
+      "verificationKey": "/XTOqC8Dcg7MlepKIg/pEsw42g0yhwFD9RJ4Ur2LWC4lL/Fc5ztyWPy9YNDyKNUQ",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "vkPKcBaRvcywcitU9JyxV6xyhmSzjDm//UusxuwDNeaQm5FP4lmFzOZCA95uTJZrrqWwm7jqlyTya4TQjFyxmrasUptLvQ"
+    },
+    {
+      "verificationKey": "x1soEy8DIQ/2Mn2NY1P1nA29FBQhbtKRFDr3e1BXUj7wQoJFy4w50hODOmHz5ZzC",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "2h2B8sn12fvVLOinV7mJL0bXZ87O+7QIS87gLaGKjYjkKphYnxFW4wjJWeC7KT9GGMHU/9xUoI4UQnYx6u0Wb/9CB2Z12Q"
+    },
+    {
+      "verificationKey": "fXgU9aPoY2dVZDQnU68NRTEHrTPfTi2eHrcPHMOeNH7albMyVHvXradHuBy9wJoQ",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "VSgtQaD2vTYyADFhcgb6WBBkUvhmiht4y0viWkmWy2Erj8DmZwEugvjyEu1J6JXPRU5bcFMuYglGVvXVmruM+UXLN7YoVg"
+    },
+    {
+      "verificationKey": "A6Isf8WhRxKnk8f66llNVFTD3R+Q75KW22+p9odKwglSMSvdMXYZtuXkisTd6lnI",
+      "path": "/1.1/jot/client_event.json",
+      "method": "POST",
+      "id": "2dp79aYceJ7LfkoeIzOAlI2NGgTGSTZLTwK2cC9ekxvQi+jyBOivwG88PVMdBDOAEcLX/N/Tk0M65BXmMQ8pW1XX3KKn2g"
+    },
+    {
+      "verificationKey": "tovP7LfkUohEXPZz/hl1D1i5FM8wyeBX7QhoPUhvvjZYmmGR9N/Qupk3bHmw31Ma",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "QvTJja71phDKBh60MbxbN00a+1aNcouiFa9KKn8KLfx0Gtgj07adkvjbdS478p0RWFlMZ0RYmVTyiZB/2wTx4AFEwJ8+QQ"
+    },
+    {
+      "verificationKey": "UJWxkBBfJNJOJzv9e2OXW9/veJgnTsvZPTl9syhAjwUcqORiqkLGQbhwXJ1IEtJX",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "uOgtCSio55xq9p+DRcPbL+NnV8Agn/ZzYYWBxQuQ+De9pBBc2hL6fvkAyOQl8Kpq76O2nb68VFh18hi0KAIrh58e7/RMuw"
+    },
+    {
+      "verificationKey": "6Gh6MSsYZ1j4gGdvHzrjUA9esFNwU9BqlIrlL5j9nYpkxe94BUNsD8ayPnukuqpU",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "xy+vvfbs36CfP0egqNj9JJfImXeUt5QXrVNNIuhfOlpNowIov8KEq8gBdfm8Y31tk9zJ4sH2XrKYiXNFmAt0e5AtddRExA"
+    },
+    {
+      "verificationKey": "2ahXhxYvk42BM/cUapnhTYXSK+WJBf3h+2kIaje15Ntv+PAcHWdIKsvOv37HcN8y",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "fKXUK/tqU+/x/U+LaBblnTH5rleZ9XmBnYcVdBZLyZinE4SMYGEbNFa3ssMCuwyjTmdyWXo0ygGxwr+ziqiFgK/YnKpwfw"
+    },
+    {
+      "verificationKey": "GX6VBiT0XixF2YDdXVLhkv6hx/k02e2H93LWq+XwOcbs9IEBP7bdKiDHmzyHFVUQ",
+      "path": "/1.1/jot/client_event.json",
+      "method": "POST",
+      "id": "pbzbMKOBUfuJ4HwlePj3RDdbBGJckXxIIlLXcw5AVZxjSVEkpJoTeI+FYj6ZIrDwtb6rgKPd8wtucaNObTNAZZ6PMviCpg"
+    },
+    {
+      "verificationKey": "mX1zGcfNJnFssHdWwB9PCmDUYLrYFkwBeFhIjxCWTS3YabprON3GTw2kDht06ZUM",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "vifDzad5c5jP0g7J6H6h8bTeat4EZqjyv8bm9jGuKPOTZtcE1YZjePGzGrClylcrsqWwm7j5JN/e0PD+vkzsJiC6oHCVvQ"
+    },
+    {
+      "verificationKey": "Vqc8Qw1CTtEHwZoJWkV7uwQSRffLdWjUPiNMAN9trPepWTPyuNLWFCCyd2fVimDz",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "AVemPUIMQ0/QBsCbCFtEeroFE0T2ynRp1T8iTQHebK32qFgy87nT1xUhs3Zm1Ith8hoPJAdu+PFP0C/qnfBAXkm1W7YWAg"
+    },
+    {
+      "verificationKey": "Dfad+QT0TXIB+zwSwh6K0qFzR4IWja9yjRESsnChWdlrLEAIiIX6tdchezkHx6td",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "KCXetdEs3GVaKdMUOuo2ovqJW2+qPqWHWqU5OppYiXHxQwRoIKCt0p3/CVMRL++DdTMmDS5HExdOFhL4We71iImW4dhzKw"
+    },
+    {
+      "verificationKey": "37Hdkp4Slz30noXB+q8BFTG9M37iGiJdg0irQ3I1SbdwUIaz9hRgljtkox9vrf4k",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "tGsFaSYqpiOJQCoxdU4btaGFCYfKVq6W6Tf8H/fGgf0DxOQyB0Kg1CKP0Ber2xlKkK+6kbLPy4CstNdOGZGjOTgsixTytw"
+    },
+    {
+      "verificationKey": "Ci5dNwpfVWpN17MCVwUbrfG04KUXyR+0kcgmei7enEgytUjSSp47bKV788b1Zr1R",
+      "path": "/1.1/jot/client_event.json",
+      "method": "GET",
+      "id": "BgwoWzEMWVNsS9G1BFEDHav3suajEc8ZspfOIHwo2JpONLNO1EyYPWqjffXA82C7Vx0IIwB9eRMszCeYA5mlNHDahEPnBQ"
+    },
+    {
+      "verificationKey": "thBSSXF34t2MzoSaCgOV1k3ZNnGcUr0///rVLR8eds6go7pv2iNjg7s8vxVdrVia",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "rRu9/+Tc2k9wIWMpN6euOHvgdJvcMf8QklJXeICys9tjDQ4XwneOzi4WkRK48AD1N7ajiKvQFVHNCK1oleoWYWyBYqF8rg"
+    },
+    {
+      "verificationKey": "S36wr+dEHTOZOi9rAOk6ZpNF7nPM5VD2JUFLm+lAz5mvpJlub2B1LcW/BGu/PMK+",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "/baDTVIaueDOZMfSlv0Ux5tuuBOOMRitC9i8tmYUvTJkUllkk5KdiNA4QvmWQsE/Q+bz2Pv1snxfz0xetG4OeAFq0iV6/g"
+    },
+    {
+      "verificationKey": "4v+jxv8iQYgi/YtwNHSDErzrJ5e6emab/v1CAR2eZsZrlCyrZLl59hXd1c1Nchcl",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "GET",
+      "id": "9xUIVDEI1bZ/1Qp8h8ODdOVLHNBgTY2RbAkKtfbqaZExnGPbXJNOjgHiKiI6uoXg0uz50vEImLntzixnTlD3u/jNZ/na9A"
+    },
+    {
+      "verificationKey": "Mno+aV+r+GGZc/buYbXPiEM6ZyqIvXy1DpwgjduuK76YxpqNmIz97+kxR0n3vf+9",
+      "path": "/i/api/graphql/wUgPBh9hEKhMMGlg8uDuFw/CreateTweet",
+      "method": "POST",
+      "id": "1eev67yKfi20TKYjO7RgGl2W77L/XWipYNtJ9VgOe/5rTRNPWE1ZKDo85JKcImgqaM7b8NNQBbQzd9JsJgtJu46ZOP8+1g"
+    },
+    {
+      "verificationKey": "06oPRkFrKj+xrUJboYKzNdEAvhlIchZ/bubZ9V8VD8NmSGOGJNDmQ+ZjbpIbEzIP",
+      "path": "/1.1/jot/client_event.json",
+      "method": "POST",
+      "id": "CdqjBk9IYiM2uKRLUqiLujzYCbcQQXsfdmfv0PxWHAbKb0Fqjy3Z70rvamebEho7BhIHLA82RlRCTBUDBOzf6fppjAmlCg"
+    }
+  ]
+}

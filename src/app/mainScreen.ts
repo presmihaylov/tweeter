@@ -1,7 +1,7 @@
-import { BoxRenderable, StyledText, TextRenderable, fg, stringToStyledText, type CliRenderer, type Renderable, type TextChunk } from '@opentui/core'
-import { focusedTweet, parentIdOf, previewOf, replyIdsOf, type AppState, type ConversationState } from '../state/store.ts'
-import type { AppMedia, AppTweet, AuthStatus } from '../twitter/types.ts'
-import { tweetTextLimit } from '../twitter/constants.ts'
+import { BoxRenderable, TextRenderable, type CliRenderer, type Renderable } from '@opentui/core'
+import { focusedTweet, parentIdOf, previewOf, replyIdsOf, type AppState, type ConversationState, type FeedId, type FeedSort } from '../state/store.ts'
+import type { AppMedia, AppTweet, AuthStatus, WriteRetryNotice } from '../twitter/types.ts'
+import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize, fitCells } from '../media/geometry.ts'
 
@@ -9,6 +9,11 @@ export type MainScreen = {
   render(state: AppState, auth?: AuthStatus): void
   placements(): ImagePlacement[]
   scrollDetail(delta: number): void
+  // Only a text that does not fit the pane earns a stop for the arrows, and the pane
+  // measures itself, so the key handler has to ask the screen.
+  detailScrolls(): boolean
+  // Which article image the pane is showing, for the key that enlarges one.
+  visibleArticleImage(): { media: AppMedia; key: string } | undefined
   destroy(): void
 }
 
@@ -17,6 +22,7 @@ export type MainScreenOptions = {
   onCloseLightbox?: () => void
   onOpenQuote?: () => void
   onOpenTweet?: (tweetId: string) => void
+  onOpenArticleImage?: (media: AppMedia, key: string) => void
 }
 
 // Reserved cells; toPlacement shrinks this to the largest square the font metrics allow.
@@ -36,6 +42,9 @@ const repliesFloor = replyCardHeight
 const mediaFloor = 3
 
 const mediaCap = 12
+// An article image shares the text area with the words around it, so it never takes more
+// rows than a paragraph would.
+const articleImageCap = 10
 
 export type DetailLayout = { parent: number; text: number; media: number; quote: number; replies: number }
 
@@ -43,7 +52,7 @@ export type DetailLayout = { parent: number; text: number; media: number; quote:
 // itself. Order of claim: the parent card, the quote card text, the tweet text, the
 // quoted photo, the tweet photo, then the replies. Anything under mediaFloor draws as a
 // useless sliver, so those rows go back to the replies instead.
-export const detailLayout = (paneHeight: number, opts: { photo: boolean; quote: boolean; quotePhoto: boolean; parent: boolean; textLines: number }): DetailLayout => {
+export const detailLayout = (paneHeight: number, opts: { photo: boolean; quote: boolean; quotePhoto: boolean; parent: boolean; textLines: number; article?: boolean }): DetailLayout => {
   if (paneHeight < 1) {
     return { parent: 0, text: detailTextFloor, media: 0, quote: 0, replies: repliesFloor }
   }
@@ -54,8 +63,12 @@ export const detailLayout = (paneHeight: number, opts: { photo: boolean; quote: 
   // The parent card is what the open tweet answers, so it is read before anything else.
   const parent = opts.parent ? Math.min(body, parentRows) : 0
   const quoteBase = opts.quote ? Math.min(body - parent, quoteRows) : 0
-  // A short tweet gives its spare rows to the photo; a long one scrolls at the cap.
-  const wanted = Math.min(detailTextCap, Math.max(detailTextFloor, opts.textLines))
+  // A short tweet gives its spare rows to the photo; a long one scrolls at the cap. An
+  // article carries thousands of characters, so it keeps every row the pane can spare
+  // above one reply card, or the reader would hold the scroll key for a page at a time.
+  const reserved = repliesFloor + (opts.photo ? mediaFloor : 0)
+  const cap = opts.article ? Math.max(detailTextCap, body - parent - quoteBase - reserved) : detailTextCap
+  const wanted = Math.min(cap, Math.max(detailTextFloor, opts.textLines))
   const text = Math.max(0, Math.min(wanted, body - parent - quoteBase))
   const rest = Math.max(0, body - parent - quoteBase - text)
   const quoteWanted = opts.quote && opts.quotePhoto
@@ -124,43 +137,130 @@ export const wrapText = (text: string, width: number): string[] => {
 export const clampScroll = (top: number, total: number, rows: number): number =>
   Math.max(0, Math.min(top, total <= rows ? 0 : total - rows + 1))
 
+// An article puts its images between the paragraphs, so the pane cannot draw the body as
+// one block of text. It becomes a flow instead: rows of text with picture boxes among
+// them, which scrolls as one column the way the article reads on x.com.
+export type FlowItem =
+  | { kind: 'line'; text: string; style?: 'header' }
+  | { kind: 'image'; key: string; media: AppMedia; rows: number }
+
+const rowsOf = (item: FlowItem): number => (item.kind === 'line' ? 1 : item.rows)
+
+export const flowRows = (items: FlowItem[]): number => items.reduce((total, item) => total + rowsOf(item), 0)
+
+const lineItems = (lines: string[], style?: 'header'): FlowItem[] =>
+  lines.map((text) => (style ? { kind: 'line', text, style } : { kind: 'line', text }))
+
+// A bullet keeps its dot on the first row only, so the wrapped rest lines up under the
+// words rather than under the dot.
+const bulletItems = (text: string, width: number): FlowItem[] =>
+  wrapText(decodeEntities(text), Math.max(1, width - 2))
+    .map((line, index) => ({ kind: 'line' as const, text: `${index === 0 ? '• ' : '  '}${line}` }))
+
+// An image claims whole rows, so it may not take more than the cap however tall it is.
+export const imageRows = (media: AppMedia, width: number, cell: CellSize, cap = articleImageCap): number => {
+  if (width < 1 || !media.width || !media.height) {
+    return Math.min(cap, mediaFloor)
+  }
+  return fitCells(media.width, media.height, width, cap, cell).rows
+}
+
+// A picture only draws on the rows the window has left for it, so a tall one leaves a hole
+// at the foot of the body until the scroll reaches it. Half the window is the largest a
+// picture may be before those holes show, so the body height caps it too.
+export const bodyImageCap = (rows: number): number => Math.max(mediaFloor, Math.min(articleImageCap, Math.floor(rows / 2)))
+
+export const detailFlow = (tweet: AppTweet | undefined, width: number, cell: CellSize, empty: string, cap = articleImageCap): FlowItem[] => {
+  const blocks = tweet?.article?.blocks
+  if (!tweet || blocks === undefined || blocks.length === 0) {
+    return lineItems(wrapText(tweet ? decodeEntities(tweet.text) : empty, width))
+  }
+  const items: FlowItem[] = lineItems(wrapText(decodeEntities(tweet.article?.title ?? ''), width), 'header')
+  let images = 0
+  for (const block of blocks) {
+    items.push({ kind: 'line', text: '' })
+    if (block.kind === 'image') {
+      items.push({ kind: 'image', key: `article:${tweet.id}:${images}`, media: block.media, rows: imageRows(block.media, width, cell, cap) })
+      images += 1
+      if (block.caption !== undefined) {
+        items.push(...lineItems(wrapText(decodeEntities(block.caption), width)))
+      }
+      continue
+    }
+    if (block.style === 'bullet') {
+      items.push(...bulletItems(block.text, width))
+      continue
+    }
+    items.push(...lineItems(wrapText(decodeEntities(block.text), width), block.style === 'header' ? 'header' : undefined))
+  }
+  return items
+}
+
 export type DetailBlock = { above?: string; lines: string[]; below?: string }
+export type FlowBlock = { above?: string; items: FlowItem[]; below?: string }
 
 // A cut tweet has to say so inside the text itself, not only in the hint line, so the
-// block spends a row on a marker at each edge that still hides text.
-export const detailBlock = (lines: string[], top: number, rows: number): DetailBlock => {
+// block spends a row on a marker at each edge that still hides text. The marker names the
+// key that works from where the arrows are, because both pairs scroll the same text.
+export const flowBlock = (items: FlowItem[], top: number, rows: number, focused = false): FlowBlock => {
   if (rows < 1) {
-    return { lines: [] }
+    return { items: [] }
   }
-  if (lines.length <= rows) {
-    return { lines: lines.slice(0, rows) }
+  if (flowRows(items) <= rows) {
+    return { items }
   }
   const above = top > 0
   const room = Math.max(0, rows - (above ? 1 : 0))
-  const size = top + room < lines.length ? Math.max(0, room - 1) : room
-  const hidden = lines.length - top - size
+  const fill = (budget: number): FlowItem[] => {
+    const taken: FlowItem[] = []
+    let used = 0
+    for (const item of items.slice(top)) {
+      if (used + rowsOf(item) > budget) {
+        break
+      }
+      taken.push(item)
+      used += rowsOf(item)
+    }
+    return taken
+  }
+  const whole = fill(room)
+  // The bottom marker costs a row, so the last item has to go when one is still hidden.
+  const shown = top + whole.length < items.length ? fill(room - 1) : whole
+  // An image taller than the whole text area would otherwise stop the scroll dead.
+  const drawn = shown.length === 0 && top < items.length ? items.slice(top, top + 1) : shown
+  const hidden = flowRows(items.slice(top + drawn.length))
   return {
-    above: above ? `▴ ${top} more above · Ctrl+W` : undefined,
-    lines: lines.slice(top, top + size),
-    below: hidden > 0 ? `▾ ${hidden} more below · Ctrl+S` : undefined
+    above: above ? `▴ ${flowRows(items.slice(0, top))} more above · ${focused ? '↑' : 'Ctrl+W'}` : undefined,
+    items: drawn,
+    below: hidden > 0 ? `▾ ${hidden} more below · ${focused ? '↓' : 'Ctrl+S'}` : undefined
   }
 }
 
-// The markers are blue so the eye separates them from the tweet, which forces one
-// StyledText instead of the plain string the rest of the pane uses.
-const blockContent = (block: DetailBlock): StyledText => {
-  const marker = fg('#58a6ff')
-  const chunks: TextChunk[] = []
-  if (block.above !== undefined) {
-    chunks.push(marker(block.above))
+export const detailBlock = (lines: string[], top: number, rows: number, focused = false): DetailBlock => {
+  const block = flowBlock(lineItems(lines), top, rows, focused)
+  return {
+    above: block.above,
+    lines: block.items.map((item) => (item.kind === 'line' ? item.text : '')).slice(0, rows),
+    below: block.below
   }
-  if (block.lines.length > 0) {
-    chunks.push(...stringToStyledText(`${chunks.length > 0 ? '\n' : ''}${block.lines.join('\n')}`).chunks)
+}
+
+// The last page spends a row on the "more above" marker, so the deepest start is the one
+// whose tail still fits in the rows that are left.
+export const clampFlowScroll = (items: FlowItem[], top: number, rows: number): number => {
+  if (top <= 0 || flowRows(items) <= rows) {
+    return 0
   }
-  if (block.below !== undefined) {
-    chunks.push(marker(`${chunks.length > 0 ? '\n' : ''}${block.below}`))
+  let used = 0
+  let deepest = items.length
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    used += rowsOf(items[index] ?? { kind: 'line', text: '' })
+    if (used > rows - 1) {
+      break
+    }
+    deepest = index
   }
-  return new StyledText(chunks)
+  return Math.min(top, deepest)
 }
 
 // Cards sit in a column with a one-row gap, so n cards need cardHeight*n + n-1 rows.
@@ -238,14 +338,20 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     content: '',
     fg: '#8b949e',
     flexGrow: 1,
+    flexShrink: 1,
+    truncate: true,
     height: 1
   })
   const headerKeys = new TextRenderable(renderer, {
     id: 'main-header-keys',
-    content: 'R refresh  Tab feed  j/k feed  ←/→ focus  ↑/↓ move  Shift+→ open  Enter more  p photo  v video  o open  q quit',
+    content: 'R refresh Tab feed s sort j/k feed ←/→ focus ↑/↓ move Shift+→ open Enter more l like p photo v video o open q quit',
     fg: '#58a6ff',
-    width: 110,
-    height: 1
+    width: 114,
+    height: 1,
+    // Two more hints made the row wider than a 173-column window, which pushed the right
+    // border off the screen. Shrinking beats overflowing.
+    flexShrink: 1,
+    truncate: true
   })
   header.add(title)
   header.add(headerMeta)
@@ -439,13 +545,15 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   detailAuthorRow.add(detailAvatar)
   detailAuthorRow.add(detailAuthorColumn)
   // The text is wrapped and sliced here rather than by the renderable, because a
-  // wrapMode box cannot be scrolled.
-  const detailText = new TextRenderable(renderer, {
-    id: 'detail-text',
-    content: '',
-    fg: '#c9d1d9',
+  // wrapMode box cannot be scrolled. The body is a column rather than one text box,
+  // because an article puts its images between the paragraphs.
+  const detailBody = new BoxRenderable(renderer, {
+    id: 'detail-body',
     width: '100%',
-    height: detailTextFloor
+    height: detailTextFloor,
+    flexShrink: 0,
+    overflow: 'hidden',
+    flexDirection: 'column'
   })
   const mediaText = new TextRenderable(renderer, {
     id: 'detail-media',
@@ -551,7 +659,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   })
   detailPane.add(parentBox)
   detailPane.add(detailAuthorRow)
-  detailPane.add(detailText)
+  detailPane.add(detailBody)
   detailPane.add(mediaText)
   detailPane.add(mediaBox)
   detailPane.add(quoteBox)
@@ -669,9 +777,11 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   let quoteMediaSlot: ImageSlot | undefined
   let detailAvatarSlot: ImageSlot | undefined
   let lightboxSlot: ImageSlot | undefined
+  let articleSlots: ImageSlot[] = []
+  let bodyParts: Renderable[] = []
   let scrollTop = 0
   let detailScroll = 0
-  let detailLines: string[] = []
+  let detailItems: FlowItem[] = []
   let detailTweetId: string | undefined
 
   const clearCards = (): void => {
@@ -680,6 +790,59 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       card.destroyRecursively()
     }
     cards = []
+  }
+
+  const clearBodyParts = (): void => {
+    for (const part of bodyParts) {
+      detailBody.remove(part.id)
+      part.destroyRecursively()
+    }
+    bodyParts = []
+  }
+
+  // The whole body is rebuilt on every frame, the way the cards are, because a scroll
+  // changes which runs of text and which pictures the column holds.
+  const renderBody = (block: FlowBlock, focused: boolean): void => {
+    clearBodyParts()
+    articleSlots = []
+    const marker = '#58a6ff'
+    let index = 0
+    const push = (part: Renderable): void => {
+      detailBody.add(part)
+      bodyParts.push(part)
+    }
+    const textPart = (lines: string[], color: string): void => {
+      push(new TextRenderable(renderer, { id: `detail-body-${index++}`, content: lines.join('\n'), fg: color, width: '100%', height: lines.length }))
+    }
+    if (block.above !== undefined) {
+      textPart([block.above], marker)
+    }
+    let run: { style?: 'header'; lines: string[] } | undefined
+    const flush = (): void => {
+      if (run) {
+        textPart(run.lines, run.style === 'header' ? '#f0f6fc' : (focused ? '#f0f6fc' : '#c9d1d9'))
+        run = undefined
+      }
+    }
+    for (const item of block.items) {
+      if (item.kind === 'line') {
+        if (run && run.style !== item.style) {
+          flush()
+        }
+        run = run ?? (item.style ? { style: item.style, lines: [] } : { lines: [] })
+        run.lines.push(item.text)
+        continue
+      }
+      flush()
+      const box = new BoxRenderable(renderer, { id: `detail-body-${index++}`, width: '100%', height: item.rows, flexShrink: 0 })
+      box.onMouseDown = () => { opts.onOpenArticleImage?.(item.media, item.key) }
+      push(box)
+      articleSlots.push({ key: item.key, url: item.media.url, box, pane: detailPane, width: item.media.width, height: item.media.height, minRows: mediaFloor })
+    }
+    flush()
+    if (block.below !== undefined) {
+      textPart([block.below], marker)
+    }
   }
 
   const clearReplyCards = (): void => {
@@ -720,7 +883,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       const column = new BoxRenderable(renderer, { id: `reply-card-${id}-column`, flexGrow: 1, height: '100%', flexDirection: 'column' })
       column.add(new TextRenderable(renderer, {
         id: `reply-card-${id}-author`,
-        content: `${repostPill(reply)}${reply.author.name}${reply.author.verified ? ' ✔' : ''}  @${reply.author.handle}${reply.quotedTweet ? '  quote' : ''}`,
+        content: `${articlePill(reply)}${repostPill(reply)}${reply.author.name}${reply.author.verified ? ' ✔' : ''}  @${reply.author.handle}${reply.quotedTweet ? '  quote' : ''}`,
         fg: selected ? '#58a6ff' : '#f0f6fc',
         width: '100%',
         height: 1,
@@ -794,7 +957,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       const mediaPill = tweet.media.length > 0 ? `  ${tweet.media.map((item) => item.type === 'photo' ? 'image' : item.type).join(' · ')}` : ''
       column.add(new TextRenderable(renderer, {
         id: `tweet-card-${id}-author`,
-        content: `${repostPill(tweet)}${tweet.author.name}${tweet.author.verified ? ' ✔' : ''}  @${tweet.author.handle}${mediaPill}`,
+        content: `${articlePill(tweet)}${repostPill(tweet)}${tweet.author.name}${tweet.author.verified ? ' ✔' : ''}  @${tweet.author.handle}${mediaPill}`,
         fg: selected ? '#58a6ff' : '#f0f6fc',
         width: '100%',
         height: 1,
@@ -837,32 +1000,41 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
         : undefined
       // X retired the v1.1 account endpoints, so a cookie session cannot resolve its own handle.
       const handle = auth?.ok && auth.username ? `@${auth.username}` : 'cookie session'
-      headerMeta.content = `${auth?.ok ? handle : 'auth pending'} · ${state.activeFeed === 'following' ? 'Following' : 'For You'}`
-      railFeeds.content = `${state.activeFeed === 'following' ? '●' : '○'} Following\n${state.activeFeed === 'forYou' ? '●' : '○'} For You\n\nTab switches`
+      headerMeta.content = `${auth?.ok ? handle : 'auth pending'} · ${feedName(state.activeFeed)}`
+      railFeeds.content = `${state.activeFeed === 'following' ? '●' : '○'} Following\n${state.activeFeed === 'forYou' ? '●' : '○'} For You\n\nTab switches\ns sorts`
       railProfile.content = auth?.ok ? `Signed in\n${handle}\n\n${auth.name ?? ''}` : 'Checking credentials…'
-      timelineHeader.content = `${state.activeFeed === 'following' ? 'Following' : 'For You'} · ${timeline.tweetIds.length} tweets`
+      timelineHeader.content = timelineTitle(state.activeFeed, state.feedSort, timeline.tweetIds.length)
       // A new tweet always starts at its first line, never at the old offset.
       if (focused?.id !== detailTweetId) {
         detailTweetId = focused?.id
         detailScroll = 0
       }
       detailAuthorName.content = focused ? `${focused.author.name}${focused.author.verified ? ' ✔' : ''}` : ''
-      detailAuthorHandle.content = focused ? `@${focused.author.handle}${focused.repostedBy ? `  ·  ↻ ${focused.repostedBy.name} reposted` : ''}` : ''
+      detailAuthorHandle.content = focused ? `${articlePill(focused)}@${focused.author.handle}${focused.repostedBy ? `  ·  ↻ ${focused.repostedBy.name} reposted` : ''}` : ''
       detailAvatarSlot = focused?.author.avatarUrl
         ? { key: `avatar:detail:${focused.id}`, url: focused.author.avatarUrl, box: detailAvatar, pane: detailPane, width: 1, height: 1, minCols: avatarCols, minRows: avatarRows }
         : undefined
-      detailLines = wrapText(focused ? decodeEntities(focused.text) : 'Select a tweet with j/k.', detailText.width)
+      const cell = cellSize(renderer.resolution, renderer.terminalWidth, renderer.terminalHeight, process.env.TWEETER_CELL_PX)
+      detailItems = detailFlow(focused, detailBody.width, cell, 'Select a tweet with j/k.')
       const photo = previewOf(focused)
-      mediaText.content = focused && focused.media.length > 0 ? focused.media.map(formatMedia).join('  ·  ') : 'No media for selected tweet.'
+      mediaText.content = mediaLine(focused, detailItems)
       const quoted = focused?.quotedTweet
       const quotePhoto = previewOf(quoted)
       const parentId = parentIdOf(state)
       const parent = parentId !== undefined ? state.tweets[parentId] : undefined
-      const layout = detailLayout(detailPane.height, { photo: photo !== undefined, quote: quoted !== undefined, quotePhoto: quotePhoto !== undefined, parent: parent !== undefined, textLines: detailLines.length })
-      detailText.height = layout.text
-      detailScroll = clampScroll(detailScroll, detailLines.length, layout.text)
-      detailText.content = blockContent(detailBlock(detailLines, detailScroll, layout.text))
-      detailHints.content = detailHint(focused, state.detailStack.length, parent !== undefined)
+      const layout = detailLayout(detailPane.height, { photo: photo !== undefined, quote: quoted !== undefined, quotePhoto: quotePhoto !== undefined, parent: parent !== undefined, textLines: flowRows(detailItems), article: focused?.article !== undefined })
+      // The row budget only exists once the layout is out, so the flow is built again with
+      // pictures that fit inside it. An article body always overflows, so the budget itself
+      // does not move.
+      const cap = bodyImageCap(layout.text)
+      if (cap !== articleImageCap && detailItems.some((item) => item.kind === 'image')) {
+        detailItems = detailFlow(focused, detailBody.width, cell, 'Select a tweet with j/k.', cap)
+      }
+      detailBody.height = layout.text
+      detailScroll = clampFlowScroll(detailItems, detailScroll, layout.text)
+      // The arrows own the text now, so it brightens the way a selected card does.
+      renderBody(flowBlock(detailItems, detailScroll, layout.text, state.textFocused), state.textFocused)
+      detailHints.content = detailHint(focused, state.detailStack.length, parent !== undefined, { scrolls: flowRows(detailItems) > layout.text, focused: state.textFocused })
       const parentSelected = parent !== undefined && parent.id === state.selectedDetailId
       parentBox.visible = parent !== undefined
       parentBox.height = layout.parent
@@ -899,7 +1071,12 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       renderReplyCards(state, layout.replies)
       composer.visible = state.composer.open
       composerTitle.content = composerHeading(state)
-      composerText.content = state.composer.error ? `${state.composer.draft || 'Start typing…'}\n\nError: ${state.composer.error}` : state.composer.draft || 'Start typing…'
+      // The drawer is measured only after it is drawn, so the shell gives the width until then:
+      // its own pad, then the border and the pad of the drawer.
+      const composerWidth = composerText.width > 0 ? composerText.width : renderer.terminalWidth - 6
+      const drawer = composerBody(state.composer.draft, state.composer.error, composerWidth)
+      composer.height = drawer.height
+      composerText.content = drawer.text
       statusText.content = state.status
       statusText.fg = state.status.includes('error') || state.status.includes('failed') ? '#ff7b72' : '#7d8590'
       renderCards(state)
@@ -913,18 +1090,28 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
         return [toPlacement(lightboxSlot, 'rect', cell, renderer)].filter((placement): placement is ImagePlacement => placement !== undefined)
       }
       const circles = [...slots, ...replySlots, detailAvatarSlot, parentAvatarSlot, quoteAvatarSlot].filter((slot): slot is ImageSlot => slot !== undefined)
-      const rects = [mediaSlot, quoteMediaSlot].filter((slot): slot is ImageSlot => slot !== undefined)
+      const rects = [...articleSlots, mediaSlot, quoteMediaSlot].filter((slot): slot is ImageSlot => slot !== undefined)
       return [
         ...circles.map((slot) => toPlacement(slot, 'circle', cell, renderer)),
         ...rects.map((slot) => toPlacement(slot, 'rect', cell, renderer))
       ].filter((placement): placement is ImagePlacement => placement !== undefined)
     },
     scrollDetail(delta: number) {
-      detailScroll = clampScroll(detailScroll + delta, detailLines.length, detailText.height)
+      detailScroll = clampFlowScroll(detailItems, detailScroll + delta, detailBody.height)
+    },
+    detailScrolls() {
+      return flowRows(detailItems) > detailBody.height
+    },
+    // p enlarges a picture without a mouse, so it needs the one the reader can see.
+    visibleArticleImage() {
+      const slot = articleSlots[0]
+      const item = detailItems.find((candidate): candidate is Extract<FlowItem, { kind: 'image' }> => candidate.kind === 'image' && candidate.key === slot?.key)
+      return item ? { media: item.media, key: item.key } : undefined
     },
     destroy() {
       clearCards()
       clearReplyCards()
+      clearBodyParts()
       renderer.root.remove(shell.id)
       shell.destroyRecursively()
       renderer.requestRender()
@@ -970,11 +1157,17 @@ const toPlacement = (slot: ImageSlot, shape: 'circle' | 'rect', cell: CellSize, 
 // The quote card is the only clickable target that is not obvious, so the hint line
 // states it both ways: how to go in, and how to come back out. The depth counts quotes
 // and replies alike, because both push onto the same stack.
-export const detailHint = (tweet: AppTweet | undefined, depth: number, hasParent = false): string => {
+export const detailHint = (tweet: AppTweet | undefined, depth: number, hasParent = false, scroll?: { scrolls: boolean; focused: boolean }): string => {
   if (!tweet) {
     return 'Select a tweet with j/k.'
   }
   const parts: string[] = []
+  if (scroll?.focused) {
+    parts.push('↑/↓ scroll  ·  → replies')
+  }
+  if (scroll?.scrolls && !scroll.focused) {
+    parts.push(`→ reads the ${tweet.article ? 'article' : 'text'}`)
+  }
   if (depth > 0) {
     parts.push(`depth ${depth}  ·  Shift+← back`)
   }
@@ -992,8 +1185,29 @@ export const detailHint = (tweet: AppTweet | undefined, depth: number, hasParent
 export const repostPill = (tweet: AppTweet): string =>
   tweet.repostedBy ? `↻ ${tweet.repostedBy.name} · ` : ''
 
+// An article is a headline over thousands of characters. Without a badge the card reads as
+// an ordinary tweet whose text happens to stop after the title. It goes in front of the
+// name, because a card line is narrow and a truncated line loses its end first.
+export const articlePill = (tweet: AppTweet | undefined): string => (tweet?.article ? '▤ article · ' : '')
+
+// x.com fills the heart on a tweet you have liked. A count alone cannot show that, so the
+// filled glyph carries it here.
+export const likeCount = (tweet: AppTweet): string =>
+  `${tweet.favorited === true ? '♥ ' : ''}${tweet.metrics.likes ?? 0} likes`
+
 const cardMetrics = (tweet: AppTweet): string =>
-  `${tweet.metrics.replies ?? 0} replies   ${tweet.metrics.reposts ?? 0} reposts   ${tweet.metrics.likes ?? 0} likes`
+  `${tweet.metrics.replies ?? 0} replies   ${tweet.metrics.reposts ?? 0} reposts   ${likeCount(tweet)}`
+
+export const feedName = (feed: FeedId): string => (feed === 'following' ? 'Following' : 'For You')
+
+export const sortName = (sort: FeedSort): string => (sort === 'popular' ? 'Popular' : 'Recent')
+
+// Only Following can be sorted, so naming a sort on For You would promise a control the
+// key does not give there.
+export const timelineTitle = (feed: FeedId, sort: FeedSort, count: number): string => {
+  const sortLabel = feed === 'following' ? `${sortName(sort)} · ` : ''
+  return `${feedName(feed)} · ${sortLabel}${count} tweets`
+}
 
 export const repliesTitle = (total: number, index: number): string => {
   if (total === 0) {
@@ -1017,6 +1231,72 @@ export const composerHeading = (state: AppState): string => {
   return `Replying to ${who} · ${count} · Enter sends · Esc closes`
 }
 
+// The drawer holds a border, a pad on each side and the heading, so a draft of one row
+// needs five rows around it.
+const composerChrome = 5
+
+// Eight rows hold a full 280-character draft down to a 40-column window, and the timeline
+// keeps the rest of the screen.
+export const composerTextCap = 8
+
+// wrapText is for a tweet that is already written, so it drops the spacing the author typed.
+// The composer shows a draft as it is typed, so this wrap keeps every space except the one it
+// breaks on.
+export const composerLines = (draft: string, width: number): string[] => {
+  if (width < 1) {
+    return draft.split('\n')
+  }
+  const lines: string[] = []
+  for (const paragraph of draft.split('\n')) {
+    let rest = paragraph
+    while (rest.length > width) {
+      const space = rest.lastIndexOf(' ', width)
+      // A word wider than the drawer has to be cut, or it would never break and never wrap.
+      const cut = space > 0 ? space : width
+      lines.push(rest.slice(0, cut))
+      rest = rest.slice(space > 0 ? cut + 1 : cut)
+    }
+    lines.push(rest)
+  }
+  return lines
+}
+
+// A one-row drawer cut the draft off at the width instead of wrapping it, so the drawer grows
+// with what it holds. Past the cap the head of the draft goes, never the foot: the reader
+// types at the foot, and the error under it says why the reply did not go.
+export const composerBody = (draft: string, error: string | undefined, width: number, cap = composerTextCap): { text: string; height: number } => {
+  const written = composerLines(draft === '' ? 'Start typing…' : draft, width)
+  const full = error === undefined ? [] : ['', ...composerLines(`Error: ${error}`, width)]
+  // The whole drawer still owes the cap, so a long reason leaves the draft one row.
+  const reason = full.slice(0, Math.max(0, cap - 1))
+  const room = cap - reason.length
+  const lines = [...written.slice(Math.max(0, written.length - room)), ...reason]
+  return { text: lines.join('\n'), height: composerChrome + lines.length }
+}
+
+// The gate stays shut for minutes, not for one request, so a reader who sends again at once
+// only holds it shut. The advice belongs on the screen, where the refusal is.
+const automationAdvice = 'X refused every retry. The gate opens again after a few quiet minutes, so wait before you send it again.'
+
+// A refused reply has to say why on screen, not only in the log. Code 226 is the automation
+// gate and every other code means something else, so the number goes in front of the reader.
+export const replyFailure = (result: { error: string; code?: number }, logPath: string): { error: string; status: string } => {
+  const reason = result.code === undefined ? result.error : `${result.error} (code ${result.code})`
+  const advice = result.code === automationWriteCode ? `\n${automationAdvice}` : ''
+  return {
+    error: `${reason}${advice}\nThe draft is kept. Log: ${logPath}`,
+    status: `reply failed (${result.code ?? 'no code'}); log: ${logPath}`
+  }
+}
+
+// A delay of two minutes reads as "120.0s" under one decimal, so whole seconds lose theirs.
+const delayLabel = (delayMs: number): string => `${Number((delayMs / 1000).toFixed(1))}s`
+
+// X names code 344 a daily limit, which it is not. Repeating that message would send the
+// reader off to check a quota that is not the problem, so say what the TUI is doing instead.
+export const retryStatus = (what: string, notice: WriteRetryNotice): string =>
+  `X refused the ${what} (code ${notice.code}); retry ${notice.attempt} of ${notice.attempts} in ${delayLabel(notice.delayMs)}`
+
 // The replies fetch themselves, so an empty list is either still in flight, refused, or
 // genuinely empty. Only the middle case asks the reader for a keystroke.
 export const repliesEmpty = (conversation: ConversationState | undefined): string => {
@@ -1033,12 +1313,25 @@ export const metricsLine = (tweet: AppTweet): string => {
   const counts = [
     `${tweet.metrics.replies ?? 0} comments`,
     `${tweet.metrics.reposts ?? 0} reposts`,
-    `${tweet.metrics.likes ?? 0} likes`
+    likeCount(tweet)
   ]
   if (tweet.metrics.views !== undefined) {
     counts.push(`${tweet.metrics.views} views`)
   }
   return counts.join('   ·   ')
+}
+
+// An article carries its pictures inside the body rather than under it, so the caption row
+// says how to enlarge one instead of claiming the tweet has no media at all.
+export const mediaLine = (tweet: AppTweet | undefined, items: FlowItem[]): string => {
+  if (tweet && tweet.media.length > 0) {
+    return tweet.media.map(formatMedia).join('  ·  ')
+  }
+  const images = items.filter((item) => item.kind === 'image').length
+  if (images > 0) {
+    return `${images} image${images === 1 ? '' : 's'} in the article  ·  click one, or p enlarges the one on screen`
+  }
+  return 'No media for selected tweet.'
 }
 
 // A terminal cannot play the mp4, so the pane draws the still frame and says which key

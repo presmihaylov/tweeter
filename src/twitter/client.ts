@@ -1,28 +1,35 @@
-import { defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, tweetDetailQueryIdFallbacks } from './constants.ts'
+import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
 import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildTweetDetailFeatures } from './features.ts'
 import { GraphQLClient } from './graphql.ts'
 import { HeaderBuilder } from './headers.ts'
+import { PageContextStore } from './pageContext.ts'
 import { QueryIdStore } from './queryIds.ts'
-import type { AuthStatus, ConversationPage, DeleteResult, PostResult, TimelinePage, TweetBundle, TwitterClientOptions } from './types.ts'
-import { extractCursorFromInstructions, getHomeInstructions, getTweetDetailInstructions, parseTweetsFromInstructions } from './extract/index.ts'
+import { generateTransactionId } from './transactionId.ts'
+import type { AuthStatus, ConversationPage, DeleteResult, LikeResult, PostResult, TimelinePage, TweetBundle, TwitterClientOptions, WriteRetryNotice } from './types.ts'
+import { extractCursorFromInstructions, getHomeInstructions, getTweetDetailInstructions, parseConversationTweets, parseHomeTweets } from './extract/index.ts'
 import { getMap, getSlice, getStr, isRecord } from '../utils/guards.ts'
 import type { Fetcher } from '../utils/fetcher.ts'
 import { defaultFetcher } from '../utils/fetcher.ts'
 import { errorMessage } from '../utils/result.ts'
 import type { DebugLogger } from '../utils/debugLog.ts'
+import { safeJsonSnippet } from '../utils/debugLog.ts'
 
 export class TwitterClient {
   private readonly baseUrl: string
   private readonly headers: HeaderBuilder
   private readonly gql: GraphQLClient
   private readonly queryIds: QueryIdStore
+  private readonly pageContext: PageContextStore
   private readonly fetchImpl: Fetcher
   private readonly debugLogger?: DebugLogger
+  private readonly sleep: (ms: number) => Promise<void>
+  private lastTransactionIdSent = false
 
   constructor(opts: TwitterClientOptions) {
     this.baseUrl = opts.baseUrl ?? defaultBaseUrl
     this.fetchImpl = opts.fetch ?? defaultFetcher
     this.debugLogger = opts.debugLogger
+    this.sleep = opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
     this.headers = new HeaderBuilder({
       authToken: opts.authToken,
       ct0: opts.ct0,
@@ -30,7 +37,28 @@ export class TwitterClient {
       cookieHeader: opts.cookieHeader
     })
     this.queryIds = new QueryIdStore(opts.queryIdPath, this.fetchImpl, () => this.headers.htmlHeaders())
-    this.gql = new GraphQLClient(opts.graphQLBase ?? defaultGraphQLBase, this.headers, this.fetchImpl)
+    this.pageContext = new PageContextStore(this.baseUrl, this.fetchImpl, () => this.headers.htmlHeaders())
+    this.gql = new GraphQLClient(opts.graphQLBase ?? defaultGraphQLBase, this.headers, this.fetchImpl, (path, method) => this.transactionIdFor(path, method))
+  }
+
+  // Fail open. Omitting the header is what the TUI did before and reads still work, so a
+  // shell that cannot be parsed must not stop a request. The debug log records every miss.
+  private async transactionIdFor(path: string, method: string): Promise<string | undefined> {
+    try {
+      const page = await this.pageContext.get()
+      if (!page) {
+        this.lastTransactionIdSent = false
+        await this.debugLogger?.log('twitter.transactionId.noPageContext', { path, method })
+        return undefined
+      }
+      const value = generateTransactionId({ path, method, page })
+      this.lastTransactionIdSent = true
+      return value
+    } catch (error) {
+      this.lastTransactionIdSent = false
+      await this.debugLogger?.log('twitter.transactionId.failed', { path, method, error: errorMessage(error) })
+      return undefined
+    }
   }
 
   async checkAuth(): Promise<AuthStatus> {
@@ -73,7 +101,7 @@ export class TwitterClient {
     return { ok: false, error: 'could not verify X credentials' }
   }
 
-  async loadHomeTimelinePage(args: { count: number; following: boolean; cursor?: string }): Promise<TimelinePage> {
+  async loadHomeTimelinePage(args: { count: number; following: boolean; ranked?: boolean; cursor?: string }): Promise<TimelinePage> {
     const operationName = args.following ? 'HomeLatestTimeline' : 'HomeTimeline'
     const variables: Record<string, unknown> = {
       count: args.count,
@@ -81,6 +109,12 @@ export class TwitterClient {
       latestControlAvailable: true,
       requestContext: args.cursor ? 'scroll' : 'launch',
       withCommunity: true
+    }
+    // The "Sort by" menu on the Following tab is this one variable. true is Popular,
+    // false is Recent, and an absent variable behaves as false. For You ranks either way
+    // and rejects nothing, but it has no such menu, so it never carries the variable.
+    if (args.following) {
+      variables.enableRanking = args.ranked === true
     }
     if (args.cursor) {
       variables.cursor = args.cursor
@@ -90,7 +124,7 @@ export class TwitterClient {
     })
     const instructions = getHomeInstructions(body)
     return {
-      tweets: parseTweetsFromInstructions(instructions),
+      tweets: parseHomeTweets(instructions),
       topCursor: extractCursorFromInstructions(instructions, 'Top'),
       bottomCursor: extractCursorFromInstructions(instructions, 'Bottom')
     }
@@ -99,7 +133,7 @@ export class TwitterClient {
   async getTweet(tweetId: string): Promise<TweetBundle> {
     const body = await this.tweetDetailRequest(tweetId)
     const instructions = getTweetDetailInstructions(body)
-    const tweets = parseTweetsFromInstructions(instructions)
+    const tweets = parseConversationTweets(instructions)
     const tweet = tweets.find((candidate) => candidate.id === tweetId) ?? tweets[0]
     if (!tweet) {
       throw new Error('tweet not found in response')
@@ -110,11 +144,12 @@ export class TwitterClient {
   async loadRepliesPage(args: { tweetId: string; cursor?: string }): Promise<ConversationPage> {
     const body = await this.tweetDetailRequest(args.tweetId, args.cursor)
     const instructions = getTweetDetailInstructions(body)
-    const replies = parseTweetsFromInstructions(instructions).filter((tweet) => tweet.id !== args.tweetId)
+    const tweets = parseConversationTweets(instructions)
     return {
       tweetId: args.tweetId,
-      replies,
-      cursor: extractCursorFromInstructions(instructions, 'Bottom')
+      replies: tweets.filter((tweet) => tweet.id !== args.tweetId),
+      cursor: extractCursorFromInstructions(instructions, 'Bottom'),
+      focal: tweets.find((tweet) => tweet.id === args.tweetId)
     }
   }
 
@@ -138,9 +173,35 @@ export class TwitterClient {
     return body
   }
 
+  // Code 344 is X's write guard, not the daily cap its message names, and code 226 is its
+  // automation gate. Both refuse the request rather than the reader, and both pass later, so
+  // the TUI asks again on a growing delay instead of making the reader press the key. Every
+  // write that fails this way created nothing, so no retry can post twice. Each code counts
+  // its own attempts, because a run can start on one code and end on the other.
+  private async withWriteRetry<T extends { ok: boolean; code?: number }>(operationName: string, onRetry: ((notice: WriteRetryNotice) => void) | undefined, call: () => Promise<T>): Promise<T> {
+    const spent = new Map<number, number>()
+    for (;;) {
+      const result = await call()
+      if (result.ok || result.code === undefined) {
+        return result
+      }
+      const delays = retryDelaysFor(result.code)
+      const attempt = spent.get(result.code) ?? 0
+      const delayMs = delays[attempt]
+      if (delayMs === undefined) {
+        return result
+      }
+      spent.set(result.code, attempt + 1)
+      const notice: WriteRetryNotice = { attempt: attempt + 1, attempts: delays.length, delayMs, code: result.code }
+      await this.debugLogger?.log('twitter.write.retry', { operationName, ...notice })
+      onRetry?.(notice)
+      await this.sleep(delayMs)
+    }
+  }
+
   // The web app posts a reply with the same cookies it reads with, so the TUI does too.
   // The reply block is what makes CreateTweet answer a tweet instead of starting one.
-  async replyToTweet(args: { tweetId: string; text: string }): Promise<PostResult> {
+  async replyToTweet(args: { tweetId: string; text: string; onRetry?: (notice: WriteRetryNotice) => void }): Promise<PostResult> {
     const variables: Record<string, unknown> = {
       tweet_text: args.text,
       reply: { in_reply_to_tweet_id: args.tweetId, exclude_reply_user_ids: [] },
@@ -148,14 +209,49 @@ export class TwitterClient {
       media: { media_entities: [], possibly_sensitive: false },
       semantic_annotation_ids: []
     }
-    try {
-      const { body, status } = await this.withQueryIdRetry('CreateTweet', [], async (queryId) => {
-        return this.gql.post('CreateTweet', queryId, variables, buildCreateTweetFeatures(), undefined, this.headers.jsonHeaders({ referer: 'https://x.com/home' }))
-      })
-      return interpretCreateTweet(body, status)
-    } catch (error) {
-      return { ok: false, error: errorMessage(error) }
-    }
+    return this.withWriteRetry('CreateTweet', args.onRetry, async () => {
+      try {
+        const { body, status } = await this.withQueryIdRetry('CreateTweet', [], async (queryId) => {
+          return this.gql.post('CreateTweet', queryId, variables, buildCreateTweetFeatures(), undefined, this.headers.jsonHeaders({ referer: 'https://x.com/home' }))
+        })
+        const result = interpretCreateTweet(body, status)
+        if (!result.ok) {
+          // X can refuse with a bare 200 and no errors array, so the body is the only evidence.
+          await this.debugLogger?.log('twitter.createTweet.refused', { status, code: result.code, transactionIdSent: this.lastTransactionIdSent, body: safeJsonSnippet(body) })
+          // A refusal is the one signal that the page data may be stale, so drop it. The key
+          // rotates per response and the next attempt should carry a fresh one.
+          await this.pageContext.refresh().catch(() => undefined)
+        }
+        return result
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) }
+      }
+    })
+  }
+
+  // One call for both directions, because the two operations differ only in their name and
+  // in the field they answer under. X returns the string "Done" on success.
+  async setLike(args: { tweetId: string; liked: boolean; onRetry?: (notice: WriteRetryNotice) => void }): Promise<LikeResult> {
+    const operationName = args.liked ? 'FavoriteTweet' : 'UnfavoriteTweet'
+    const field = args.liked ? 'favorite_tweet' : 'unfavorite_tweet'
+    return this.withWriteRetry(operationName, args.onRetry, async () => {
+      try {
+        const { body, status } = await this.withQueryIdRetry(operationName, [], async (queryId) => {
+          return this.gql.post(operationName, queryId, { tweet_id: args.tweetId }, {}, undefined, this.headers.jsonHeaders({ referer: 'https://x.com/home' }))
+        })
+        if (getStr(getMap(body, 'data'), field) === 'Done') {
+          return { ok: true }
+        }
+        const failure = graphQLError(body, status)
+        if (failure.code === alreadyFavoritedCode) {
+          return { ok: true }
+        }
+        await this.debugLogger?.log('twitter.setLike.refused', { operationName, tweetId: args.tweetId, status, code: failure.code, transactionIdSent: this.lastTransactionIdSent, body: safeJsonSnippet(body) })
+        return { ok: false, ...failure }
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) }
+      }
+    })
   }
 
   async deleteTweet(tweetId: string): Promise<DeleteResult> {
@@ -221,7 +317,7 @@ const graphQLError = (body: unknown, status: number): { error: string; code?: nu
   if (status === 401 || status === 403) {
     return { error: 'X rejected the cookies; refresh auth_token and ct0', status }
   }
-  return { error: `X refused the write with status ${status}`, status }
+  return { error: `X refused the write and gave no reason (status ${status}); the response body is in the log`, status }
 }
 
 const parseCurrentUser = (text: string): AuthStatus => {

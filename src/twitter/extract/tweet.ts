@@ -1,6 +1,7 @@
 import type { AppTweet } from '../types.ts'
 import { getBool, getInt, getMap, getSlice, getStr, isRecord } from '../../utils/guards.ts'
 import { extractMedia } from './media.ts'
+import { extractArticle } from './article.ts'
 import { extractTweetText } from './text.ts'
 
 export const unwrapTweetResult = (result: unknown): unknown => {
@@ -58,14 +59,28 @@ export const mapTweetResult = (result: unknown, quoteDepth = 1): AppTweet | unde
     quotedTweetId: quotedTweet?.id,
     quotedTweet,
     favorited: getBool(legacy, 'favorited') || undefined,
-    retweeted: getBool(legacy, 'retweeted') || undefined
+    retweeted: getBool(legacy, 'retweeted') || undefined,
+    article: extractArticle(unwrapped)
   })
 }
 
 // X serves avatars at 48px under the _normal suffix; the 400px variant survives a TUI upscale.
 export const upsizeAvatar = (url: string): string => url.replace(/_normal\.(jpg|jpeg|png|gif|webp)$/i, '_400x400.$1')
 
-export const collectTweetResultsFromEntry = (entry: unknown): unknown[] => {
+export type EntryIdFilter = (entryId: string) => boolean
+
+// A TweetDetail response carries more than the conversation. X pads a thin thread with
+// unrelated tweets under a "Discover more" header (tweetdetailrelatedtweets-*) and drops
+// ads inside the reply modules. Neither is a reply, so keep only the conversation entries.
+// The same test fits an entry and a module item, because an item id repeats its entry id.
+export const isConversationEntryId = (entryId: string): boolean => {
+  if (entryId.includes('promoted-tweet-')) {
+    return false
+  }
+  return entryId.startsWith('tweet-') || entryId.startsWith('conversationthread-')
+}
+
+export const collectTweetResultsFromEntry = (entry: unknown, allowEntryId?: EntryIdFilter): unknown[] => {
   const results: unknown[] = []
   const content = getMap(entry, 'content')
   if (!content) {
@@ -80,6 +95,9 @@ export const collectTweetResultsFromEntry = (entry: unknown): unknown[] => {
   push(getMap(getMap(getMap(content, 'itemContent'), 'tweet_results'), 'result'))
   push(getMap(getMap(getMap(getMap(content, 'item'), 'itemContent'), 'tweet_results'), 'result'))
   for (const item of getSlice(content, 'items') ?? []) {
+    if (allowEntryId && !allowEntryId(getStr(item, 'entryId'))) {
+      continue
+    }
     push(getMap(getMap(getMap(getMap(item, 'item'), 'itemContent'), 'tweet_results'), 'result'))
     push(getMap(getMap(getMap(item, 'itemContent'), 'tweet_results'), 'result'))
     push(getMap(getMap(getMap(getMap(item, 'content'), 'itemContent'), 'tweet_results'), 'result'))
@@ -87,13 +105,61 @@ export const collectTweetResultsFromEntry = (entry: unknown): unknown[] => {
   return results
 }
 
-export const parseTweetsFromInstructions = (instructions: unknown[], quoteDepth = 1): AppTweet[] => {
+export const parseTweetsFromInstructions = (instructions: unknown[], quoteDepth = 1, allowEntryId?: EntryIdFilter): AppTweet[] => {
   const seen = new Set<string>()
   const tweets: AppTweet[] = []
   for (const instruction of instructions) {
     for (const entry of getSlice(instruction, 'entries') ?? []) {
-      for (const result of collectTweetResultsFromEntry(entry)) {
+      if (allowEntryId && !allowEntryId(getStr(entry, 'entryId'))) {
+        continue
+      }
+      for (const result of collectTweetResultsFromEntry(entry, allowEntryId)) {
         const tweet = mapTweetResult(result, quoteDepth)
+        if (!tweet || seen.has(tweet.id)) {
+          continue
+        }
+        seen.add(tweet.id)
+        tweets.push(tweet)
+      }
+    }
+  }
+  return tweets
+}
+
+export const parseConversationTweets = (instructions: unknown[], quoteDepth = 1): AppTweet[] => {
+  return parseTweetsFromInstructions(instructions, quoteDepth, isConversationEntryId)
+}
+
+const isAdEntryId = (entryId: string): boolean => entryId.includes('promoted-tweet-')
+
+// X answers a reply from somebody you follow with a home-conversation module: the tweet that
+// was answered, then the answer, sometimes a third tweet under it. On x.com they draw as one
+// connected column. As separate cards they read as the same conversation two or three times
+// over, so the feed keeps the tweet the thread starts from. Its replies are one keystroke away.
+const isHomeConversationEntryId = (entryId: string): boolean => entryId.startsWith('home-conversation-')
+
+export const parseHomeTweets = (instructions: unknown[], quoteDepth = 1): AppTweet[] => {
+  const seen = new Set<string>()
+  const tweets: AppTweet[] = []
+  for (const instruction of instructions) {
+    for (const entry of getSlice(instruction, 'entries') ?? []) {
+      const entryId = getStr(entry, 'entryId')
+      if (isAdEntryId(entryId)) {
+        continue
+      }
+      const parsed: AppTweet[] = []
+      for (const result of collectTweetResultsFromEntry(entry, (itemId) => !isAdEntryId(itemId))) {
+        const tweet = mapTweetResult(result, quoteDepth)
+        if (tweet) {
+          parsed.push(tweet)
+        }
+      }
+      // The first item is the tweet the thread starts from. The fallback covers a module
+      // X built from replies alone, where dropping everything would lose the entry.
+      const kept = isHomeConversationEntryId(entryId)
+        ? [parsed.find((tweet) => tweet.inReplyToStatusId === undefined) ?? parsed[0]]
+        : parsed
+      for (const tweet of kept) {
         if (!tweet || seen.has(tweet.id)) {
           continue
         }

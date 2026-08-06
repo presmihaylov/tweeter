@@ -1,11 +1,11 @@
 import { CliRenderEvents, createCliRenderer } from '@opentui/core'
-import type { AuthStatus, PostResult } from '../twitter/types.ts'
+import type { AppMedia, AuthStatus, PostResult } from '../twitter/types.ts'
 import { TwitterClient } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { beginConversationLoad, clearDetailSelection, enterSelection, failConversationLoad, focusedTweet, initialAppState, leaveSelection, mergeConversationPage, mergeTimelinePage, needsReplies, previewOf, selectFirstReply, selectRelativeDetail, selectRelativeTweet, toggleLightbox, videoOf, type AppState, type FeedId } from '../state/store.ts'
-import { createMainScreen } from './mainScreen.ts'
+import { applyLike, beginConversationLoad, clearDetailSelection, enterSelection, failConversationLoad, focusDetailText, focusedTweet, initialAppState, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeTimelinePage, needsOlderTweets, needsReplies, previewOf, selectFirstReply, selectRelativeDetail, selectRelativeTweet, setFeedSort, toggleLightbox, videoOf, type AppState, type FeedId, type TimelineState } from '../state/store.ts'
+import { createMainScreen, replyFailure, retryStatus } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
@@ -15,6 +15,40 @@ import { cellSize } from '../media/geometry.ts'
 import { detectImageRenderer } from '../media/detect.ts'
 import { kittyDeleteAll } from '../media/kitty.ts'
 import { openExternal, tweetUrl } from '../media/openExternal.ts'
+
+// Which end of the feed a fetch asks for. X gives a page two cursors that point opposite
+// ways, so the mode picks the cursor and the mode picks where the page lands.
+export type FeedLoad = 'initial' | 'newer' | 'older'
+
+export const cursorFor = (timeline: TimelineState, mode: FeedLoad): string | undefined => {
+  if (mode === 'newer') {
+    return timeline.topCursor
+  }
+  if (mode === 'older') {
+    return timeline.bottomCursor
+  }
+  return undefined
+}
+
+export const feedLoadStatus = (mode: FeedLoad): string => {
+  if (mode === 'newer') {
+    return 'checking for new tweets'
+  }
+  if (mode === 'older') {
+    return 'loading older tweets'
+  }
+  return 'loading feed'
+}
+
+export const feedLoadResult = (mode: FeedLoad, added: number): string => {
+  if (mode === 'newer') {
+    return added > 0 ? `${added} new tweets` : 'no new tweets'
+  }
+  if (mode === 'older') {
+    return added > 0 ? `${added} older tweets` : 'no older tweets'
+  }
+  return `loaded ${added} tweets`
+}
 
 export type TerminalAppOptions = {
   config: TweeterConfig
@@ -49,6 +83,11 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       state = toggleLightbox(state, tweet, previewOf(tweet))
       rerender()
     }
+    // An article image belongs to the body, not to the tweet, so it carries its own key.
+    const openArticleImage = (media: AppMedia, key: string): void => {
+      state = toggleLightbox(state, focusedTweet(state), media, key)
+      rerender()
+    }
     const closePhoto = (): void => {
       state = toggleLightbox(state, undefined, undefined)
       rerender()
@@ -61,7 +100,8 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       onOpenPhoto: openPhoto,
       onCloseLightbox: closePhoto,
       onOpenQuote: () => { openSelection() },
-      onOpenTweet: (tweetId) => { openSelection(tweetId) }
+      onOpenTweet: (tweetId) => { openSelection(tweetId) },
+      onOpenArticleImage: openArticleImage
     })
     const client = new TwitterClient({ authToken: profile.authToken, ct0: profile.ct0, cookieHeader: profile.cookieHeader, debugLogger })
     attachImageLayer(screen)
@@ -82,24 +122,64 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }, 300)
     }
 
+    // The end of the feed pulls the next page down on its own, because R now asks for what
+    // is new instead. The same delay keeps a fast j from queueing a fetch per keystroke.
+    let olderTimer: ReturnType<typeof setTimeout> | undefined
+    const scheduleOlderTweets = (): void => {
+      clearTimeout(olderTimer)
+      if (!needsOlderTweets(state)) {
+        return
+      }
+      olderTimer = setTimeout(() => {
+        if (needsOlderTweets(state)) {
+          void loadOlder()
+        }
+      }, 300)
+    }
+
     const rerender = (): void => {
       screen.render(state, session.auth)
       scheduleReplies()
+      scheduleOlderTweets()
     }
     // Pane heights drive the detail row budget, so a resize needs a fresh pass.
     renderer.on(CliRenderEvents.RESIZE, rerender)
 
-    const loadFeed = async (feed: FeedId): Promise<void> => {
-      state = { ...state, activeFeed: feed, timelines: { ...state.timelines, [feed]: { ...state.timelines[feed], loading: true, error: undefined } }, status: 'loading feed' }
+    const loadFeed = async (feed: FeedId, mode: FeedLoad): Promise<void> => {
+      const before = state.timelines[feed].tweetIds.length
+      state = { ...state, activeFeed: feed, timelines: { ...state.timelines, [feed]: { ...state.timelines[feed], loading: true, error: undefined } }, status: feedLoadStatus(mode) }
       rerender()
       try {
-        const page = await client.loadHomeTimelinePage({ count: 40, following: feed === 'following', cursor: state.timelines[feed].bottomCursor })
-        state = mergeTimelinePage(state, feed, page.tweets, page)
-        state = { ...state, status: `loaded ${page.tweets.length} tweets` }
+        const page = await client.loadHomeTimelinePage({
+          count: 40,
+          following: feed === 'following',
+          ranked: state.feedSort === 'popular',
+          cursor: cursorFor(state.timelines[feed], mode)
+        })
+        state = mergeTimelinePage(state, feed, page.tweets, page, mode === 'newer' ? 'top' : 'bottom')
+        const added = state.timelines[feed].tweetIds.length - before
+        // New tweets sit above the selection, where the reader cannot see them, so a
+        // refresh that found some also moves the cursor up to them.
+        const top = state.timelines[feed].tweetIds[0]
+        if (mode === 'newer' && added > 0 && top !== undefined) {
+          state = { ...state, selectedTweetId: top, detailStack: [], selectedDetailId: undefined, textFocused: false }
+        }
+        state = { ...state, status: feedLoadResult(mode, added) }
       } catch (error) {
         state = { ...state, status: 'feed error', timelines: { ...state.timelines, [feed]: { ...state.timelines[feed], loading: false, error: errorMessage(error) } } }
       }
       rerender()
+    }
+
+    // One page down at a time, or a fast j would queue a fetch per keystroke.
+    let loadingOlder = false
+    const loadOlder = async (): Promise<void> => {
+      if (loadingOlder) {
+        return
+      }
+      loadingOlder = true
+      await loadFeed(state.activeFeed, 'older')
+      loadingOlder = false
     }
 
     const loadReplies = async (tweetId: string): Promise<void> => {
@@ -109,11 +189,46 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       try {
         const page = await client.loadRepliesPage({ tweetId, cursor })
         state = mergeConversationPage(state, tweetId, page.replies, page.cursor)
+        // An article reaches the feed as its title alone, so the body only lands here.
+        state = page.focal ? mergeFocalTweet(state, page.focal) : state
         // The page also carries the thread above the tweet, so count what the pane keeps.
         state = { ...state, status: `loaded ${state.conversations[tweetId]?.replyIds.length ?? 0} replies` }
       } catch (error) {
         state = failConversationLoad(state, tweetId, errorMessage(error))
       }
+      rerender()
+    }
+
+    // A second press before X answers would race the first one and leave the card showing
+    // the wrong heart, so one tweet takes one call at a time.
+    const likeInFlight = new Set<string>()
+
+    const toggleLike = async (): Promise<void> => {
+      const tweet = focusedTweet(state)
+      if (!tweet || likeInFlight.has(tweet.id)) {
+        return
+      }
+      const liked = !(tweet.favorited ?? false)
+      likeInFlight.add(tweet.id)
+      state = { ...applyLike(state, tweet.id, liked), status: liked ? 'sending like' : 'removing like' }
+      rerender()
+      const result = await client.setLike({
+        tweetId: tweet.id,
+        liked,
+        onRetry: (notice) => {
+          state = { ...state, status: retryStatus('like', notice) }
+          rerender()
+        }
+      })
+      likeInFlight.delete(tweet.id)
+      if (result.ok) {
+        state = { ...state, status: liked ? `liked @${tweet.author.handle}` : `removed the like on @${tweet.author.handle}` }
+        rerender()
+        return
+      }
+      await debugLogger.log('ui.like.failed', { tweetId: tweet.id, liked, error: result.error, code: result.code, logPath: debugLogger.path })
+      // X kept the old state, so the card has to go back to it rather than lie.
+      state = { ...applyLike(state, tweet.id, !liked), status: `like failed: ${result.error}; log: ${debugLogger.path}` }
       rerender()
     }
 
@@ -134,14 +249,22 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       state = { ...state, composer: { ...state.composer, sending: true, error: undefined }, status: 'sending reply' }
       rerender()
       await debugLogger.log('ui.reply.submit', { replyToTweetId, textLength: text.length })
-      const result: PostResult = await client.replyToTweet({ tweetId: replyToTweetId, text })
+      const result: PostResult = await client.replyToTweet({
+        tweetId: replyToTweetId,
+        text,
+        onRetry: (notice) => {
+          state = { ...state, status: retryStatus('reply', notice) }
+          rerender()
+        }
+      })
       if (result.ok) {
         state = { ...state, composer: { open: false, draft: '', sending: false }, status: `sent reply ${result.tweetId}` }
         rerender()
         return
       }
       await debugLogger.log('ui.reply.failed', { replyToTweetId, error: result.error, status: result.status, code: result.code, logPath: debugLogger.path })
-      state = { ...state, composer: { ...state.composer, sending: false, error: `${result.error}\nLog: ${debugLogger.path}` }, status: `reply failed; log: ${debugLogger.path}` }
+      const failure = replyFailure(result, debugLogger.path)
+      state = { ...state, composer: { ...state.composer, sending: false, error: failure.error }, status: failure.status }
       rerender()
     }
 
@@ -203,15 +326,26 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         rerender()
         return
       }
-      // The plain arrows follow the focus: → moves it into the replies, ← hands it back
-      // to the feed, and ↑/↓ walk whichever list holds it. j/k always stay on the feed.
+      // The plain arrows follow the focus: → walks it rightwards through the pane, ← hands
+      // it back to the feed, and ↑/↓ work on whatever holds it. j/k always stay on the feed.
+      // The text is a stop of its own only when it does not fit, so a short tweet keeps the
+      // old walk, where → lands straight on the replies.
       if (key.name === 'right') {
-        state = selectFirstReply(state)
+        state = state.textFocused || state.selectedDetailId !== undefined || !screen.detailScrolls()
+          ? selectFirstReply(state)
+          : focusDetailText(state)
         rerender()
         return
       }
       if (key.name === 'left') {
-        state = state.selectedDetailId ? clearDetailSelection(state) : leaveSelection(state)
+        state = state.selectedDetailId !== undefined || state.textFocused ? clearDetailSelection(state) : leaveSelection(state)
+        rerender()
+        return
+      }
+      // An article is thousands of characters, so the arrows scroll it a line at a time.
+      // Ctrl+S and Ctrl+W still page it from anywhere.
+      if (state.textFocused && (key.name === 'down' || key.name === 'up')) {
+        screen.scrollDetail(key.name === 'down' ? 1 : -1)
         rerender()
         return
       }
@@ -237,12 +371,36 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
       if (key.name === 'tab') {
         const next = state.activeFeed === 'following' ? 'forYou' : 'following'
-        void loadFeed(next)
+        // A feed the reader already opened keeps its tweets and its place, so Tab only
+        // fetches the first page of a feed that holds nothing yet.
+        if (state.timelines[next].tweetIds.length > 0) {
+          state = { ...state, activeFeed: next, selectedTweetId: state.timelines[next].tweetIds[0], detailStack: [], selectedDetailId: undefined, textFocused: false, status: 'switched feed' }
+          rerender()
+          return
+        }
+        void loadFeed(next, 'initial')
+        return
+      }
+      // Only the Following feed carries a sort. On For You the key would silently do
+      // nothing, so say so instead.
+      if (key.name === 's') {
+        if (state.activeFeed !== 'following') {
+          state = { ...state, status: 'sort applies to the Following feed only' }
+          rerender()
+          return
+        }
+        state = setFeedSort(state, state.feedSort === 'popular' ? 'recent' : 'popular')
+        void loadFeed('following', 'initial')
         return
       }
       // Shift+R arrives as name 'r' with shift set, so refresh must win over the reply composer.
       if (key.name === 'R' || (key.shift && key.name === 'r')) {
-        void loadFeed(state.activeFeed)
+        void loadFeed(state.activeFeed, 'newer')
+        return
+      }
+      // Shift+L already opens the selection, so plain l alone is the like.
+      if (key.name === 'l' && !key.shift) {
+        void toggleLike()
         return
       }
       if (key.name === 'r' && focusedTweet(state)) {
@@ -252,9 +410,15 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
       if (key.name === 'p') {
         const focused = focusedTweet(state)
-        if (focused) {
-          openPhoto(previewOf(focused) ? 'tweet' : 'quote')
+        if (!focused) {
+          return
         }
+        const inArticle = previewOf(focused) ? undefined : screen.visibleArticleImage()
+        if (inArticle) {
+          openArticleImage(inArticle.media, inArticle.key)
+          return
+        }
+        openPhoto(previewOf(focused) ? 'tweet' : 'quote')
         return
       }
       if (key.name === 'o') {
@@ -288,7 +452,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     state = { ...state, status: `validating ${profileName}` }
     rerender()
     const feed = config.ui?.defaultFeed === 'forYou' ? 'forYou' : 'following'
-    await loadFeed(feed)
+    await loadFeed(feed, 'initial')
     // The feed load is itself an auth probe; only spend a second request when it comes back empty.
     session.auth = state.timelines[feed].tweetIds.length > 0
       ? { ok: true, source: 'timeline' }
