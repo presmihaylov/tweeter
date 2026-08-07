@@ -352,6 +352,7 @@ export const helpGroups: readonly HelpGroup[] = [
     entries: [
       { keys: 'Enter', what: 'send' },
       { keys: 'Esc', what: 'close and keep the draft' },
+      { keys: 'Cmd+V', what: 'paste the clipboard' },
       { keys: '← / →', what: 'move the caret' },
       { keys: 'Alt+← / Alt+→', what: 'jump a word' },
       { keys: 'Home / End', what: 'the two ends of the line' },

@@ -1,4 +1,4 @@
-import { CliRenderEvents, createCliRenderer } from '@opentui/core'
+import { CliRenderEvents, createCliRenderer, decodePasteBytes } from '@opentui/core'
 import type { AppMedia, AuthStatus, PostResult, WriteRetryNotice } from '../twitter/types.ts'
 import { TwitterClient } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
@@ -9,7 +9,7 @@ import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './ma
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
-import { caretMoveFor, helpScrollStep, isCtrlEnterKey, isEnterKey, isHelpKey, isTextInput } from './keyEvents.ts'
+import { caretMoveFor, cleanPasted, helpScrollStep, isCtrlEnterKey, isEnterKey, isHelpKey, isTextInput, pastedText } from './keyEvents.ts'
 import { createImageLayer, writeToTerminal, type ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize } from '../media/geometry.ts'
 import { detectImageRenderer } from '../media/detect.ts'
@@ -58,8 +58,14 @@ export type TerminalAppOptions = {
   debugLog?: string
 }
 
+// Cmd+V reaches the app as one whole piece of text only when the terminal is told to wrap a
+// paste in markers. Without them the clipboard arrives as keystrokes, and a newline in it
+// reads as Enter and sends the draft half written.
+const bracketedPaste = (on: boolean): string => `${String.fromCharCode(0x1b)}[?2004${on ? 'h' : 'l'}`
+
 export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> => {
   const renderer = await createCliRenderer({
+    onDestroy: () => { writeToTerminal(bracketedPaste(false)) },
     screenMode: 'alternate-screen',
     useMouse: true,
     exitOnCtrlC: true,
@@ -71,6 +77,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     useThread: false
   })
   renderer.start()
+  writeToTerminal(bracketedPaste(true))
   const debugLogger = createDebugLogger(opts.debugLog)
 
   const startAuthenticated = async (config: TweeterConfig, profileName: string, profile: TweeterProfile): Promise<void> => {
@@ -306,6 +313,20 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       rerender()
     }
 
+    // Cmd+V lands here whole, from a terminal that marks a paste. The drawer is the only
+    // place text goes, so a paste with the drawer shut is dropped rather than acted on.
+    renderer.keyInput.on('paste', (event) => {
+      if (!state.composer.open) {
+        return
+      }
+      const text = cleanPasted(decodePasteBytes(event.bytes))
+      if (text === '') {
+        return
+      }
+      state = insertIntoDraft(state, text)
+      rerender()
+    })
+
     renderer.keyInput.on('keypress', (key) => {
       // An enlarged photo swallows q and Esc; quitting from it would surprise the reader.
       if (state.lightbox && (key.name === 'q' || key.name === 'escape' || key.name === 'p' || isEnterKey(key))) {
@@ -356,6 +377,14 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         }
         if (key.name === 'backspace' || key.name === 'delete') {
           state = deleteFromDraft(state, key.name === 'delete' ? 1 : -1)
+          rerender()
+          return
+        }
+        // A terminal that does not mark a paste sends the clipboard as one long keypress,
+        // which this catches before the single keystrokes below.
+        const pasted = pastedText(key)
+        if (pasted !== undefined) {
+          state = insertIntoDraft(state, pasted)
           rerender()
           return
         }

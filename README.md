@@ -77,7 +77,9 @@ The card lays itself out for the window it opens in. It sits in the middle of th
 - `t` — repost the open tweet with your own words; the same drawer opens and posts a quote
 - `q` — quit
 
-The drawer is a text field. `←` / `→` move the caret, `Alt+←` / `Alt+→` jump a word, `Home` / `End` (or `Ctrl+A` / `Ctrl+E`) reach the two ends, and `Backspace` / `Delete` take the character on either side of it. A paste lands whole.
+The drawer is a text field. `←` / `→` move the caret, `Alt+←` / `Alt+→` jump a word, `Home` / `End` (or `Ctrl+A` / `Ctrl+E`) reach the two ends, and `Backspace` / `Delete` take the character on either side of it.
+
+`Cmd+V` pastes. The terminal, not tweeter, sees that key, so tweeter turns on bracketed paste at startup and turns it off on the way out; the terminal then wraps the clipboard in markers and the whole text arrives as one piece rather than as a run of keystrokes. That matters for more than speed: an unmarked newline arrives as `Enter`, which would send the draft half written. A terminal that will not mark a paste still works, because a run of characters that does not start an escape sequence is read as a paste too. Either way the line breaks become spaces, the trailing one is dropped, and the rest of the control characters come out, since the drawer holds one line.
 
 A tweet with several photos draws them side by side, up to the four X allows. Click one to enlarge it.
 

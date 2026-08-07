@@ -34,17 +34,38 @@ export const caretMoveFor = (key: AppKey): CaretMove | undefined => {
   return undefined
 }
 
-const hasControlChar = (text: string): boolean =>
-  [...text].some((char) => {
-    const code = char.codePointAt(0) ?? 0
-    return code < 0x20 || code === 0x7f
-  })
+const escape = String.fromCharCode(0x1b)
+
+const isControlChar = (char: string): boolean => {
+  const code = char.codePointAt(0) ?? 0
+  return code < 0x20 || code === 0x7f
+}
+
+const hasControlChar = (text: string): boolean => [...text].some(isControlChar)
 
 // A paste arrives as one keypress carrying every character, and an arrow key arrives as an
 // escape sequence. Only a sequence with nothing to control the terminal is text to insert.
 export const isTextInput = (key: AppKey): key is AppKey & { sequence: string } =>
   key.sequence !== undefined && key.sequence !== '' && !key.ctrl && key.meta !== true
     && !hasControlChar(key.sequence)
+
+// What the clipboard puts in the draft. The composer holds one line, so a line break becomes
+// a space rather than nothing, and every other control character comes out. A newline left in
+// the middle would send the draft, and an escape would read as an arrow key.
+export const cleanPasted = (raw: string): string =>
+  [...raw.replace(/\r\n|\r|\n/g, ' ')].filter((char) => !isControlChar(char)).join('').trimEnd()
+
+// The same clipboard, from a terminal that answers Cmd+V without bracketed paste. It drops
+// the whole text in as one keypress instead, which only the length tells apart from a
+// keystroke. An escape sequence is many characters too, so a run that starts one is a key.
+export const pastedText = (key: AppKey): string | undefined => {
+  const raw = key.sequence
+  if (raw === undefined || raw.length < 2 || key.ctrl || key.meta === true || raw.startsWith(escape)) {
+    return undefined
+  }
+  const text = cleanPasted(raw)
+  return text === '' ? undefined : text
+}
 
 // Terminals disagree about ? : some name the key, some report the / it shares with Shift,
 // and some only carry the character in the sequence. All three mean the same press.
