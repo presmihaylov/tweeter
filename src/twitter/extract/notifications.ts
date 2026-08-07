@@ -1,4 +1,4 @@
-import type { AppNotice, NoticeIcon, NotificationPage, NotificationRow } from '../types.ts'
+import type { AppNotice, NoticeIcon, NoticeList, NotificationPage, NotificationRow } from '../types.ts'
 import { getInt, getMap, getSlice, getStr } from '../../utils/guards.ts'
 import { parseLegacyTweets } from './legacyTweet.ts'
 
@@ -45,7 +45,22 @@ const firstTargetTweetId = (notification: unknown): string | undefined => {
   return getStr(getMap(target, 'tweet'), 'id') || undefined
 }
 
-const noticeFor = (notification: unknown, users: unknown): AppNotice | undefined => {
+// The entry, not the notice, says where the line leads. A tweet of yours is an ExternalUrl and
+// the template already names it; a list of somebody else's posts is a UrtEndpoint on a path of
+// its own, which is where the bell line and an aggregated like keep what they stand for.
+const noticeListFor = (item: unknown): NoticeList | undefined => {
+  const url = getMap(getMap(item, 'notification'), 'url')
+  const path = getStr(url, 'url')
+  if (getStr(url, 'urlType') !== 'UrtEndpoint' || !path.startsWith('/2/')) {
+    return undefined
+  }
+  const options = getMap(url, 'urtEndpointOptions')
+  // X writes the title and the subtitle as the two halves of one heading: "Liked" and "by Ann".
+  const title = [getStr(options, 'title'), getStr(options, 'subtitle')].filter((part) => part !== '').join(' ')
+  return { path, title: title || 'Posts' }
+}
+
+const noticeFor = (notification: unknown, item: unknown, users: unknown): AppNotice | undefined => {
   const text = getStr(getMap(notification, 'message'), 'text')
   if (text === '') {
     return undefined
@@ -55,7 +70,8 @@ const noticeFor = (notification: unknown, users: unknown): AppNotice | undefined
     icon: noticeIconFor(getStr(getMap(notification, 'icon'), 'id')),
     text,
     avatarUrl: avatarUrl || undefined,
-    createdAt: isoFromMillis(getInt(notification, 'timestampMs'))
+    createdAt: isoFromMillis(getInt(notification, 'timestampMs')),
+    list: noticeListFor(item)
   })
 }
 
@@ -100,7 +116,7 @@ export const parseNotificationsPage = (body: unknown): NotificationPage => {
         continue
       }
       const notification = getMap(notifications, getStr(getMap(item, 'notification'), 'id'))
-      const notice = noticeFor(notification, users)
+      const notice = noticeFor(notification, item, users)
       if (!notice) {
         continue
       }

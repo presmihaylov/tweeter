@@ -1,6 +1,6 @@
 import { BoxRenderable, CliRenderEvents, TextRenderable, type CliRenderer, type Renderable } from '@opentui/core'
 import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, replyIdsOf, type AppState, type ConversationState, type FeedSort, type NotificationsState, type TabId } from '../state/store.ts'
-import type { AppMedia, AppTweet, AuthStatus, NoticeIcon, NotificationRow, WriteRetryNotice } from '../twitter/types.ts'
+import type { AppMedia, AppNotice, AppTweet, AuthStatus, NoticeIcon, NotificationRow, WriteRetryNotice } from '../twitter/types.ts'
 import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize, fitCells } from '../media/geometry.ts'
@@ -330,7 +330,7 @@ export const helpGroups: readonly HelpGroup[] = [
       { keys: 'Shift+→', what: 'open the card under the aim' },
       { keys: 'Shift+←', what: 'back to the tweet you came from' },
       { keys: 'Ctrl+W / Ctrl+S', what: 'scroll a long tweet up or down' },
-      { keys: 'Enter', what: 'load more replies' }
+      { keys: 'Enter', what: 'load more replies, or a notice list' }
     ]
   },
   {
@@ -1252,9 +1252,15 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     cards.push(empty)
   }
 
-  // Both lists draw the same card, so the timeline and the notifications tab build it here.
-  const addTweetCard = (id: string, tweet: AppTweet, selected: boolean): void => {
+  // Both lists draw the same card, so the timeline and the notifications tab build it here. A
+  // post opened out of a notice line steps in, the way x.com lists it under its heading.
+  const addTweetCard = (id: string, tweet: AppTweet, selected: boolean, nested = false): void => {
     const card = cardBox(renderer, `tweet-card-${id}`, selected)
+    if (nested) {
+      // A width of 100% plus a margin is wider than the pane, so the card stretches instead.
+      card.marginLeft = 2
+      card.width = 'auto'
+    }
     const avatar = new BoxRenderable(renderer, {
       id: `tweet-card-${id}-avatar`,
       width: avatarCols,
@@ -1299,7 +1305,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
 
   // A notice says what happened; the tweet under it says what it happened to. A notice X sent
   // about nothing this app can open, such as a post alert, keeps the second line empty.
-  const addNoticeCard = (row: NotificationRow, tweet: AppTweet | undefined, selected: boolean): void => {
+  const addNoticeCard = (row: NotificationRow, tweet: AppTweet | undefined, selected: boolean, opened = false): void => {
     const notice = row.notice
     if (!notice) {
       return
@@ -1337,7 +1343,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     }))
     column.add(new TextRenderable(renderer, {
       id: `${id}-metrics`,
-      content: tweet ? cardMetrics(tweet) : '',
+      content: tweet ? cardMetrics(tweet) : noticeHint(notice, opened),
       fg: '#7d8590',
       width: '100%',
       height: 1
@@ -1367,11 +1373,12 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       const tweet = row.tweetId !== undefined ? state.tweets[row.tweetId] : undefined
       const selected = row.key === state.selectedRowKey
       if (row.notice) {
-        addNoticeCard(row, tweet, selected)
+        addNoticeCard(row, tweet, selected, rows.some((other) => other.parentKey === row.key))
         continue
       }
       if (tweet) {
-        addTweetCard(tweet.id, tweet, selected)
+        // A row keys its own card, because the same post can stand under two notice lines.
+        addTweetCard(row.key, tweet, selected, row.parentKey !== undefined)
       }
     }
   }
@@ -1720,6 +1727,15 @@ export const noticeGlyph = (icon: NoticeIcon): string => {
     return '⊕'
   }
   return icon === 'bell' ? '◆' : '•'
+}
+
+// A line that stands for a list has no counts to show on its last row, so the row says what
+// the key does instead. x.com puts the same words over the page it opens.
+export const noticeHint = (notice: AppNotice, opened: boolean): string => {
+  if (!notice.list) {
+    return ''
+  }
+  return `${opened ? 'Enter closes' : 'Enter opens'} ${notice.list.title}`
 }
 
 export const repliesTitle = (total: number, index: number): string => {

@@ -3,14 +3,17 @@ import { createTestRenderer } from '@opentui/core/testing'
 import { TwitterClient } from '../src/twitter/client.ts'
 import { parseNotificationsPage } from '../src/twitter/extract/notifications.ts'
 import { parseLegacyTweets } from '../src/twitter/extract/legacyTweet.ts'
-import { createMainScreen, feedName, headerLine, noticeGlyph, notificationsTitle, railTabs } from '../src/app/mainScreen.ts'
+import { createMainScreen, feedName, headerLine, noticeGlyph, noticeHint, notificationsTitle, railTabs } from '../src/app/mainScreen.ts'
 import { nextTab, notificationLoadResult } from '../src/app/terminalApp.ts'
 import {
+  collapseNotice,
+  expandNotice,
   focusedTweet,
   initialAppState,
   mergeNotificationsPage,
   needsOlderNotifications,
   needsOlderTweets,
+  noticeExpanded,
   selectRelativeRow,
   selectedRow,
   type AppState
@@ -24,6 +27,8 @@ const bob = legacyUser('22', 'bob')
 const mine = legacyTweet('101', '99', 'a post of mine')
 const mention = legacyTweet('102', '11', 'hey @me look at this')
 
+const bellList = { path: '/2/notifications/device_follow.json', title: 'Posts' }
+
 const page = (): unknown => notificationsBody({
   users: [alice, bob, legacyUser('99', 'me')],
   tweets: [mine, mention],
@@ -31,7 +36,14 @@ const page = (): unknown => notificationsBody({
     legacyNotice({ id: 'N1', icon: 'heart_icon', text: 'ALICE and BOB liked your post', fromUserIds: ['11', '22'], targetTweetId: '101' }),
     legacyNotice({ id: 'N2', icon: 'bell_icon', text: 'New post notifications for ALICE', fromUserIds: ['11'] })
   ],
-  entries: [noticeEntry('N1', { fromUserIds: ['11', '22'], targetTweetId: '101' }), mentionEntry('102'), noticeEntry('N2', { fromUserIds: ['11'] })]
+  entries: [noticeEntry('N1', { fromUserIds: ['11', '22'], targetTweetId: '101' }), mentionEntry('102'), noticeEntry('N2', { fromUserIds: ['11'], list: bellList })]
+})
+
+// What the bell line stands for: the posts of the accounts the reader subscribed to.
+const behindTheLine = (): unknown => notificationsBody({
+  users: [alice],
+  tweets: [legacyTweet('201', '11', 'the first post from somebody I subscribed to'), legacyTweet('202', '11', 'the second one')],
+  entries: [mentionEntry('201'), mentionEntry('202')]
 })
 
 describe('reading the notifications payload', () => {
@@ -85,6 +97,31 @@ describe('reading the notifications payload', () => {
     const row = parseNotificationsPage(page()).rows[2]
     expect(row?.notice?.icon).toBe('bell')
     expect(row?.tweetId).toBeUndefined()
+  })
+
+  test('a line that stands for a list carries the path and the heading', () => {
+    const rows = parseNotificationsPage(page()).rows
+    expect(rows[2]?.notice?.list).toEqual({ path: '/2/notifications/device_follow.json', title: 'Posts' })
+    // A line about a post of yours points at that post, not at a list.
+    expect(rows[0]?.notice?.list).toBeUndefined()
+  })
+
+  test('the two halves of the heading become one title', () => {
+    const body = notificationsBody({
+      users: [alice],
+      notices: [legacyNotice({ id: 'N3', icon: 'heart_icon', text: 'ALICE liked 4 posts', fromUserIds: ['11'] })],
+      entries: [noticeEntry('N3', { fromUserIds: ['11'], list: { path: '/2/notifications/view/abc.json', title: 'Liked', subtitle: 'by ALICE' } })]
+    })
+    expect(parseNotificationsPage(body).rows[0]?.notice?.list?.title).toBe('Liked by ALICE')
+  })
+
+  test('a path outside the notifications API never becomes a list', () => {
+    const body = notificationsBody({
+      users: [alice],
+      notices: [legacyNotice({ id: 'N4', icon: 'bell_icon', text: 'New post alert', fromUserIds: ['11'] })],
+      entries: [noticeEntry('N4', { fromUserIds: ['11'], list: { path: 'https://evil.test/steal.json', title: 'Posts' } })]
+    })
+    expect(parseNotificationsPage(body).rows[0]?.notice?.list).toBeUndefined()
   })
 
   test('takes both cursors off the operation entries', () => {
@@ -144,6 +181,29 @@ describe('asking X for the notifications', () => {
       fetch: async () => jsonResponse({ errors: [{ code: 32 }] }, { status: 401 })
     })
     await expect(client.loadNotificationsPage({ count: 40 })).rejects.toThrow('401')
+  })
+
+  test('asks for the posts on the path X named on the line', async () => {
+    let seen = ''
+    const client = new TwitterClient({
+      authToken: 'auth',
+      ct0: 'csrf',
+      fetch: async (url) => {
+        seen = String(url)
+        return jsonResponse(behindTheLine())
+      }
+    })
+    const parsed = await client.loadNoticeList({ path: bellList.path, count: 40 })
+    expect(parsed.rows.map((row) => row.key)).toEqual(['tweet-201', 'tweet-202'])
+    expect(seen.startsWith('https://x.com/i/api/2/notifications/device_follow.json?')).toBe(true)
+    expect(seen).toContain('count=40')
+    expect(seen).toContain('tweet_mode=extended')
+  })
+
+  test('refuses a path that does not belong to the notifications API', async () => {
+    const client = new TwitterClient({ authToken: 'auth', ct0: 'csrf', fetch: async () => jsonResponse({}) })
+    await expect(client.loadNoticeList({ path: 'https://evil.test/steal.json', count: 40 })).rejects.toThrow('will not follow')
+    await expect(client.loadNoticeList({ path: '/2/../1.1/dm/inbox.json', count: 40 })).rejects.toThrow('will not follow')
   })
 
   test('reads the unread badge x.com draws on its own tab', async () => {
@@ -221,6 +281,84 @@ describe('the notifications tab in the state', () => {
     // The notifications tab holds no timeline, so the feed loader must not fire here.
     expect(needsOlderTweets(state)).toBe(false)
     expect(needsOlderNotifications({ ...state, activeTab: 'following' })).toBe(false)
+  })
+})
+
+describe('the posts behind a notice line', () => {
+  const opened = (): AppState => expandNotice(loaded(), 'notification-N2', parseNotificationsPage(behindTheLine()))
+
+  test('the posts land under the line and name it', () => {
+    const state = opened()
+    expect(state.notifications.rows.map((row) => row.key)).toEqual([
+      'notification-N1',
+      'tweet-102',
+      'notification-N2',
+      'notification-N2/tweet-201',
+      'notification-N2/tweet-202'
+    ])
+    expect(state.notifications.rows[3]?.parentKey).toBe('notification-N2')
+    expect(noticeExpanded(state, 'notification-N2')).toBe(true)
+    expect(noticeExpanded(loaded(), 'notification-N2')).toBe(false)
+  })
+
+  test('the keys act on a post opened under a line', () => {
+    const state = selectRelativeRow(opened(), 3)
+    expect(focusedTweet(state)?.text).toBe('the first post from somebody I subscribed to')
+  })
+
+  test('a second open replaces the posts instead of repeating them', () => {
+    const again = expandNotice(opened(), 'notification-N2', parseNotificationsPage(behindTheLine()))
+    expect(again.notifications.rows).toHaveLength(5)
+  })
+
+  test('a line the list does not belong to leaves the rows alone', () => {
+    const state = expandNotice(loaded(), 'notification-gone', parseNotificationsPage(behindTheLine()))
+    expect(state.notifications.rows).toHaveLength(3)
+  })
+
+  test('closing takes the posts away and puts the cursor back on the line', () => {
+    const state = selectRelativeRow(opened(), 4)
+    expect(state.selectedRowKey).toBe('notification-N2/tweet-202')
+    const closed = collapseNotice(state, 'notification-N2')
+    expect(closed.notifications.rows).toHaveLength(3)
+    expect(closed.selectedRowKey).toBe('notification-N2')
+  })
+
+  test('a cursor above the line stays where it is when the line closes', () => {
+    const closed = collapseNotice(opened(), 'notification-N2')
+    expect(closed.selectedRowKey).toBe('notification-N1')
+  })
+
+  test('the last row of the line says what Enter does', () => {
+    const rows = parseNotificationsPage(page()).rows
+    const bell = rows[2]?.notice
+    expect(bell && noticeHint(bell, false)).toBe('Enter opens Posts')
+    expect(bell && noticeHint(bell, true)).toBe('Enter closes Posts')
+    const like = rows[0]?.notice
+    expect(like && noticeHint(like, false)).toBe('')
+  })
+
+  test('draws the posts as cards that step in under the line', async () => {
+    const harness = await createTestRenderer({ width: 174, height: 52 })
+    const screen = createMainScreen(harness.renderer)
+    const body = notificationsBody({
+      users: [alice],
+      notices: [legacyNotice({ id: 'N2', icon: 'bell_icon', text: 'New post alert', fromUserIds: ['11'] })],
+      entries: [noticeEntry('N2', { fromUserIds: ['11'], list: bellList })]
+    })
+    const first = mergeNotificationsPage({ ...initialAppState(), activeTab: 'notifications' }, parseNotificationsPage(body))
+    const state = expandNotice(first, 'notification-N2', parseNotificationsPage(behindTheLine()))
+    screen.render(state)
+    await harness.flush()
+    screen.render(state)
+    await harness.flush()
+    const frame = harness.captureCharFrame()
+    expect(frame).toContain('Enter closes Posts')
+    expect(frame).toContain('the first post from somebody I')
+    const line = (text: string): string => frame.split('\n').find((row) => row.includes(text)) ?? ''
+    // A post under a line steps in two columns, the way x.com lists it under its heading.
+    expect(line('ALICE  @alice').indexOf('ALICE') - line('◆ New post alert').indexOf('◆')).toBe(2)
+    screen.destroy()
   })
 })
 

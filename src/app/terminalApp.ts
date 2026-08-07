@@ -1,10 +1,10 @@
 import { CliRenderEvents, createCliRenderer, decodePasteBytes } from '@opentui/core'
-import type { AppMedia, AuthStatus, PostResult, WriteRetryNotice } from '../twitter/types.ts'
+import type { AppMedia, AuthStatus, NotificationRow, PostResult, WriteRetryNotice } from '../twitter/types.ts'
 import { TwitterClient } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, deleteFromDraft, enterSelection, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, openComposer, previewOf, previewsOf, selectFirstReply, selectRelativeDetail, selectRelativeRow, scrollHelp, selectRelativeTweet, setFeedSort, toggleHelp, toggleLightbox, videoOf, type AppState, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
+import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, selectRelativeTweet, setFeedSort, toggleHelp, toggleLightbox, videoOf, type AppState, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
 import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
@@ -228,6 +228,30 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
       rerender()
       await refreshBadge()
+    }
+
+    // A notice line stands for a list of posts, and this opens that list under the line. Enter
+    // on a line that is already open takes the posts away again.
+    const toggleNoticeList = async (row: NotificationRow): Promise<void> => {
+      const list = row.notice?.list
+      if (!list) {
+        return
+      }
+      if (noticeExpanded(state, row.key)) {
+        state = { ...collapseNotice(state, row.key), status: `closed ${list.title}` }
+        rerender()
+        return
+      }
+      state = { ...state, notifications: { ...state.notifications, loading: true, error: undefined }, status: `loading ${list.title}` }
+      rerender()
+      try {
+        const page = await client.loadNoticeList({ path: list.path, count: 40 })
+        state = expandNotice(state, row.key, page)
+        state = { ...state, status: `${page.rows.length} posts · ${list.title}` }
+      } catch (error) {
+        state = { ...state, status: 'notifications error', notifications: { ...state.notifications, loading: false, error: errorMessage(error) } }
+      }
+      rerender()
     }
 
     // The badge is a second request, so a failure only means the count stays as it was.
@@ -626,8 +650,15 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         rerender()
         return
       }
-      // The first page arrives on its own, so Enter is only how the reader asks for more.
+      // The first page arrives on its own, so Enter is only how the reader asks for more. On a
+      // notice line that stands for a list, it opens that list instead, since the line has no
+      // replies of its own.
       if (isEnterKey(key)) {
+        const row = state.activeTab === 'notifications' ? selectedRow(state) : undefined
+        if (row?.notice?.list) {
+          void toggleNoticeList(row)
+          return
+        }
         const tweetId = focusedTweet(state)?.id
         if (tweetId) {
           void loadReplies(tweetId)

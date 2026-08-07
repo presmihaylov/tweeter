@@ -67,7 +67,7 @@ The card lays itself out for the window it opens in. It sits in the middle of th
 - `Shift+→` — open the selected reply or replied-to card, or the quoted tweet when nothing is selected (a click on the card does the same)
 - `Shift+←` — go back to the tweet you came from
 - `Ctrl+S` / `Ctrl+W` — scroll the open tweet's text down / up when it is longer than the pane
-- `Enter` — load the next page of replies for the open tweet
+- `Enter` — load the next page of replies for the open tweet, or open the posts behind a notification line
 - `p` — enlarge the open tweet's first photo, or the article picture on the screen (a click enlarges the picture you clicked; `p`, `Esc`, `Enter` or a click closes it)
 - `v` — hand the open tweet's video to your system player
 - `o` — open the open tweet in your browser
@@ -143,7 +143,9 @@ Notifications are the one read X never moved to GraphQL. They come from `/i/api/
 
 A row is one of two things. A mention or a reply arrives as the tweet itself and draws the same bordered card as the feed. Everything else arrives as a line X wrote, names and all, such as `Ann and 2 others liked your post`, and the app shows the sentence as it stands rather than rebuilding it from the parts. A `♥`, `↻`, `⊕` or `◆` in front of it says which kind it is, since the sentence never states that, and the first person named in it lends the avatar. Under the sentence sits the post it is about. One live page came back as 15 notices and 53 tweets over 18 users, and the icons on it were 13 hearts, one repost and one bell.
 
-The row under the cursor names the tweet it is about, so `l`, `b`, `r`, `t`, `o`, `p`, `v` and the detail pane all act on that tweet with no second path through the code. A notice about something this app cannot open, such as a post alert or a new follower, leaves those keys with nothing to act on. Paging works as it does on the feeds: the same two cursors, `R` for what arrived since, and the next page down fetched on its own once the selection comes within five rows of the end.
+The row under the cursor names the tweet it is about, so `l`, `b`, `r`, `t`, `o`, `p`, `v` and the detail pane all act on that tweet with no second path through the code. A notice about something this app cannot open, such as a new follower, leaves those keys with nothing to act on. Paging works as it does on the feeds: the same two cursors, `R` for what arrived since, and the next page down fetched on its own once the selection comes within five rows of the end.
+
+Two of those lines stand for a second list rather than for a post of yours. `New post notifications for Ann and 2 others` is the accounts you subscribed to, and `Ann liked 4 posts` is the four posts she liked; neither carries a tweet, because X keeps what they stand for behind a path of its own. The entry names that path as a `UrtEndpoint`, `/2/notifications/device_follow.json` for the bell and `/2/notifications/view/<id>.json` for the aggregated like, and both answer in the same shape as the tab, so one parser and one request method serve both. `Enter` on such a line fetches the list and draws it as ordinary cards, stepped in two columns under the line, the way x.com lists them under its heading; `Enter` again takes them away. The last row of the line says which of the two it will do and names the list, `Enter opens Posts` or `Enter closes Liked by Ann`, in X's own words. The posts sit in the same row list as everything else, so `j`, `k` and every tweet key walk into them and act on them like any other card. The path arrives from X rather than from this code, so it is checked against `/2/` before it is used.
 
 The header carries the unread count x.com draws on its own tab, from `badge_count.json`, on every tab rather than only on this one. The app only reads that count. Clearing it is a write, and x.com clears it when you read the tab there, so the number here goes down when x.com says it does and not when you scroll past a row.
 
@@ -233,6 +235,7 @@ Implemented:
 - `?` floats a centred key popup over the panes, in three columns that collapse to two and then one on a narrow terminal, and scroll when the window is too short
 - `R` refreshes from the top cursor and prepends what is new, while the older pages page in from the bottom cursor on their own as the selection nears the end
 - a Notifications tab on `Tab`, off the old REST `notifications/all.json`: mentions as ordinary tweet cards, everything else as X's own aggregated line with a `♥`/`↻`/`⊕`/`◆` glyph and an avatar, every tweet shortcut acting on the row under the cursor
+- `Enter` on a notification line that stands for a list, such as the bell line or an aggregated like, fetches that list and draws it as cards under the line
 - the unread badge from `badge_count.json` in the header, read only, so x.com stays the one thing that clears it
 - automatic retry with backoff on X's transient write refusal (error 344) and on its automation gate (error 226, up to 5 retries over 230s), for replies, likes and bookmarks
 - mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, notifications, the key popup and its reflow, the cookie write path and its refusal codes, OAuth flow, media helpers

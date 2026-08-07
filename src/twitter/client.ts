@@ -144,6 +144,19 @@ export class TwitterClient {
     return parseNotificationsPage(body)
   }
 
+  // The posts behind a notice line. X names the path on the entry, and it answers in the same
+  // shape as the tab itself, so the same parser reads it. The path is checked before it is used,
+  // because it arrives from the response rather than from this code.
+  async loadNoticeList(args: { path: string; count: number }): Promise<NotificationPage> {
+    if (!args.path.startsWith('/2/') || args.path.includes('..')) {
+      throw new Error(`X named a notification path this app will not follow: ${args.path}`)
+    }
+    const params = new URLSearchParams(notificationParams)
+    params.set('count', String(args.count))
+    const body = await this.restGet(`/i/api${args.path}?${params.toString()}`)
+    return parseNotificationsPage(body)
+  }
+
   // What x.com puts on its own tab as a blue dot. It is a read, so it never clears the count;
   // only x.com itself does that.
   async loadBadgeCounts(): Promise<BadgeCounts> {

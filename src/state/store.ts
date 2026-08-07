@@ -222,6 +222,41 @@ export const mergeNotificationsPage = (state: AppState, page: NotificationPage, 
   }
 }
 
+// A notice that stands for a list draws its posts under it, in the same row list, so j and k
+// walk them and every tweet key acts on them. Each post names the notice it came from, which is
+// how it is drawn as part of that line and taken away again.
+export const expandNotice = (state: AppState, key: string, page: NotificationPage): AppState => {
+  const merged = mergeTweets(state, page.tweets)
+  const rows = merged.notifications.rows.filter((row) => row.parentKey !== key)
+  const index = rows.findIndex((row) => row.key === key)
+  if (index < 0) {
+    return merged
+  }
+  const nested = page.rows.map((row) => ({ ...row, key: `${key}/${row.key}`, parentKey: key }))
+  return {
+    ...merged,
+    notifications: {
+      ...merged.notifications,
+      rows: [...rows.slice(0, index + 1), ...nested, ...rows.slice(index + 1)],
+      loading: false,
+      error: undefined
+    }
+  }
+}
+
+export const collapseNotice = (state: AppState, key: string): AppState => {
+  const rows = state.notifications.rows.filter((row) => row.parentKey !== key)
+  return {
+    ...state,
+    notifications: { ...state.notifications, rows },
+    // The cursor cannot stay on a row that is gone, so it falls back to the line it came from.
+    selectedRowKey: rows.some((row) => row.key === state.selectedRowKey) ? state.selectedRowKey : key
+  }
+}
+
+export const noticeExpanded = (state: AppState, key: string): boolean =>
+  state.notifications.rows.some((row) => row.parentKey === key)
+
 export const selectedRow = (state: AppState): NotificationRow | undefined =>
   state.notifications.rows.find((row) => row.key === state.selectedRowKey)
 

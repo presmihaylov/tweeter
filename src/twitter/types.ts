@@ -57,6 +57,14 @@ export type TweetBundle = {
 // the ones the TUI draws, and anything else falls back to a plain dot.
 export type NoticeIcon = 'like' | 'repost' | 'follow' | 'bell' | 'other'
 
+// Some notices stand for a list of posts rather than for one post of yours: the bell line
+// stands for what the accounts you subscribed to published, and an aggregated like stands for
+// the posts that person liked. X names the path that holds them and the title it draws above.
+export type NoticeList = {
+  path: string
+  title: string
+}
+
 // One aggregated line off the notifications tab, such as "Ann and 2 others liked your post".
 // X writes the whole sentence, names and all, so the TUI shows it as it stands.
 export type AppNotice = {
@@ -64,15 +72,19 @@ export type AppNotice = {
   text: string
   avatarUrl?: string
   createdAt?: string
+  list?: NoticeList
 }
 
 // A row on the notifications tab is either a tweet card, when somebody mentioned or answered
 // this account, or a notice line. A notice that names a tweet carries its id, so the detail
 // pane and the like, bookmark and reply keys all keep working on the row under the cursor.
+// A row opened out of a notice names that notice, which is how it is drawn under it and taken
+// away again.
 export type NotificationRow = {
   key: string
   tweetId?: string
   notice?: AppNotice
+  parentKey?: string
 }
 
 export type NotificationPage = {

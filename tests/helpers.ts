@@ -203,13 +203,27 @@ export const legacyNotice = (args: { id: string; icon: string; text: string; fro
   timestampMs: args.timestampMs ?? 1704067200000
 })
 
-export const noticeEntry = (noticeId: string, args: { fromUserIds: string[]; targetTweetId?: string }): unknown => ({
+// A line about a post of yours points at that post. A line that stands for a list of other
+// people's posts points at the path that holds them, which is where the bell line leads.
+type NoticeListArg = { path: string; title: string; subtitle?: string }
+
+const noticeUrl = (list?: NoticeListArg): unknown => {
+  if (!list) {
+    return { urlType: 'ExternalUrl', url: 'https://x.test/status/1' }
+  }
+  const options = list.subtitle
+    ? { title: list.title, subtitle: list.subtitle, cacheId: 'cache-1' }
+    : { title: list.title, cacheId: 'cache-1' }
+  return { urlType: 'UrtEndpoint', url: list.path, urtEndpointOptions: options }
+}
+
+export const noticeEntry = (noticeId: string, args: { fromUserIds: string[]; targetTweetId?: string; list?: NoticeListArg }): unknown => ({
   entryId: `notification-${noticeId}`,
   sortIndex: '1786111112303',
   content: {
     item: {
       clientEventInfo: { component: 'ntab' },
-      content: { notification: { id: noticeId, url: { urlType: 'ExternalUrl', url: 'https://x.test/status/1' }, fromUsers: args.fromUserIds, targetTweets: args.targetTweetId ? [args.targetTweetId] : [] } }
+      content: { notification: { id: noticeId, url: noticeUrl(args.list), fromUsers: args.fromUserIds, targetTweets: args.targetTweetId ? [args.targetTweetId] : [] } }
     }
   }
 })
