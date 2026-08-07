@@ -5,9 +5,10 @@ import { createHash } from 'node:crypto'
 // four loading animations as SVG paths, the bundle replays one of them as a CSS animation,
 // pauses it, and hashes the computed style it reads back. This is a port of that code.
 //
-// Verified against the genuine generator in a real Chrome: 81 of 81 generated ids matched
-// byte for byte, and the animation model matched on all 4 elements x 16 rows x 182 reachable
-// pause times. tools/checkTransactionId.ts re-runs that check when x.com ships a new bundle.
+// Verified against the genuine generator in a real Chrome: 120 of 120 generated ids matched
+// byte for byte, over 40 page keys that between them reach all 4 animations and 14 of the 16
+// frames. tests/fixtures/transactionId.json holds them, and tests/transactionId.test.ts
+// replays every one.
 //
 // The header decodes to 70 bytes:
 //   [0]      a random mask byte, sent in the clear
@@ -208,11 +209,18 @@ export const styleToAnimationKey = (style: string): string =>
     .join('')
     .replace(/[.-]/g, '')
 
+// Which animation, which frame and which pause time the key selects. X moves these byte
+// indices when it ships a new ondemand.s bundle, and every request signed with the old ones
+// fails on the endpoints that check the header. tests/transactionId.test.ts pins them.
+const elementByte = 5
+const rowByte = 12
+const pauseBytes = [1, 28, 29]
+
 export const computeAnimationKey = (keyBytes: Uint8Array, animationPaths: string[]): string => {
   const byteAt = (index: number): number => keyBytes[index] ?? 0
-  const elementIndex = byteAt(5) % 4
-  const rowIndex = byteAt(7) % 16
-  const pauseMs = (byteAt(30) % 16) * (byteAt(47) % 16) * (byteAt(2) % 16)
+  const elementIndex = byteAt(elementByte) % 4
+  const rowIndex = byteAt(rowByte) % 16
+  const pauseMs = pauseBytes.reduce((product, index) => product * (byteAt(index) % 16), 1)
 
   const svg = animationPaths[elementIndex]
   if (svg === undefined) {

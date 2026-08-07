@@ -12,9 +12,9 @@ import {
   transactionPathOf
 } from '../src/twitter/transactionId.ts'
 
-// Every id in the fixture came out of the real x.com generator in a live Chrome. The keys
-// fed to it are random bytes, not a page token of any account, so the file carries no
-// credential. The port has to reproduce all of them exactly.
+// Every id in the fixture came out of the real x.com generator in a live Chrome, on pages
+// nobody was signed in to. A verification key belongs to one HTML response and rotates on
+// the next, so the file carries no credential. The port has to reproduce all of them.
 const animationPaths = fixture.animSvgs
 
 describe('x-client-transaction-id', () => {
@@ -93,13 +93,29 @@ describe('x-client-transaction-id', () => {
     }
   })
 
-  test('picks the animation frame from the key bytes', () => {
-    const key = Buffer.alloc(48)
-    key[5] = 2
-    key[7] = 9
-    const first = computeAnimationKey(new Uint8Array(key), animationPaths)
-    key[7] = 10
-    expect(computeAnimationKey(new Uint8Array(key), animationPaths)).not.toBe(first)
+  // X moved these three byte groups when it shipped a new ondemand.s bundle, and every
+  // request we signed with the old ones failed. This pins where they sit now.
+  test('picks the animation, the frame and the pause from bytes 5, 12 and 1/28/29', () => {
+    const base = Buffer.alloc(48)
+    base[5] = 2
+    base[12] = 9
+    base[1] = 5
+    base[28] = 7
+    base[29] = 3
+    const keyOf = (change: (bytes: Buffer) => void): string => {
+      const bytes = Buffer.from(base)
+      change(bytes)
+      return computeAnimationKey(new Uint8Array(bytes), animationPaths)
+    }
+    const first = keyOf(() => undefined)
+
+    for (const index of [5, 12, 1, 28, 29]) {
+      expect(keyOf((bytes) => { bytes[index] = (base[index] ?? 0) + 1 })).not.toBe(first)
+    }
+    // The bytes the old bundle read. They must not move the key any more.
+    for (const index of [7, 2, 30, 47]) {
+      expect(keyOf((bytes) => { bytes[index] = 11 })).toBe(first)
+    }
   })
 
   test('formats matrix numbers the way Blink does, not the way JavaScript does', () => {

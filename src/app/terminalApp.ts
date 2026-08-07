@@ -4,7 +4,7 @@ import { TwitterClient } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { applyLike, beginConversationLoad, clearDetailSelection, closeComposer, deleteFromDraft, enterSelection, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeTimelinePage, moveComposerCaret, needsOlderTweets, needsReplies, openComposer, previewOf, previewsOf, selectFirstReply, selectRelativeDetail, selectRelativeTweet, setFeedSort, toggleLightbox, videoOf, type AppState, type FeedId, type TimelineState } from '../state/store.ts'
+import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, deleteFromDraft, enterSelection, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeTimelinePage, moveComposerCaret, needsOlderTweets, needsReplies, openComposer, previewOf, previewsOf, selectFirstReply, selectRelativeDetail, selectRelativeTweet, setFeedSort, toggleLightbox, videoOf, type AppState, type FeedId, type TimelineState } from '../state/store.ts'
 import { createMainScreen, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
@@ -234,6 +234,36 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       rerender()
     }
 
+    const bookmarkInFlight = new Set<string>()
+
+    const toggleBookmark = async (): Promise<void> => {
+      const tweet = focusedTweet(state)
+      if (!tweet || bookmarkInFlight.has(tweet.id)) {
+        return
+      }
+      const bookmarked = !(tweet.bookmarked ?? false)
+      bookmarkInFlight.add(tweet.id)
+      state = { ...applyBookmark(state, tweet.id, bookmarked), status: bookmarked ? 'adding bookmark' : 'removing bookmark' }
+      rerender()
+      const result = await client.setBookmark({
+        tweetId: tweet.id,
+        bookmarked,
+        onRetry: (notice) => {
+          state = { ...state, status: retryStatus('bookmark', notice) }
+          rerender()
+        }
+      })
+      bookmarkInFlight.delete(tweet.id)
+      if (result.ok) {
+        state = { ...state, status: bookmarked ? `bookmarked @${tweet.author.handle}` : `removed the bookmark on @${tweet.author.handle}` }
+        rerender()
+        return
+      }
+      await debugLogger.log('ui.bookmark.failed', { tweetId: tweet.id, bookmarked, error: result.error, code: result.code, logPath: debugLogger.path })
+      state = { ...applyBookmark(state, tweet.id, !bookmarked), status: `bookmark failed: ${result.error}; log: ${debugLogger.path}` }
+      rerender()
+    }
+
     const sendComposer = async (): Promise<void> => {
       const targetId = state.composer.targetTweetId
       const target = targetId ? state.tweets[targetId] : undefined
@@ -412,6 +442,10 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       // Shift+L already opens the selection, so plain l alone is the like.
       if (key.name === 'l' && !key.shift) {
         void toggleLike()
+        return
+      }
+      if (key.name === 'b') {
+        void toggleBookmark()
         return
       }
       if (key.name === 'r') {

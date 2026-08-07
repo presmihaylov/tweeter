@@ -1,4 +1,4 @@
-import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
+import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, notBookmarkedCode, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
 import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildTweetDetailFeatures } from './features.ts'
 import { GraphQLClient } from './graphql.ts'
 import { HeaderBuilder } from './headers.ts'
@@ -261,6 +261,33 @@ export class TwitterClient {
           return { ok: true }
         }
         await this.debugLogger?.log('twitter.setLike.refused', { operationName, tweetId: args.tweetId, status, code: failure.code, transactionIdSent: this.lastTransactionIdSent, body: safeJsonSnippet(body) })
+        return { ok: false, ...failure }
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) }
+      }
+    })
+  }
+
+  // The same shape as setLike: one call for both directions, and X answers "Done". A bookmark
+  // is private, so nothing here is visible to anybody but the account that made it.
+  async setBookmark(args: { tweetId: string; bookmarked: boolean; onRetry?: (notice: WriteRetryNotice) => void }): Promise<LikeResult> {
+    const operationName = args.bookmarked ? 'CreateBookmark' : 'DeleteBookmark'
+    const field = args.bookmarked ? 'tweet_bookmark_put' : 'tweet_bookmark_delete'
+    return this.withWriteRetry(operationName, args.onRetry, async () => {
+      try {
+        const { body, status } = await this.withQueryIdRetry(operationName, [], async (queryId) => {
+          return this.gql.post(operationName, queryId, { tweet_id: args.tweetId }, {}, undefined, this.headers.jsonHeaders({ referer: 'https://x.com/home' }))
+        })
+        if (getStr(getMap(body, 'data'), field) === 'Done') {
+          return { ok: true }
+        }
+        const failure = graphQLError(body, status)
+        // X answers a repeat with its own code in each direction. The tweet already carries
+        // what the caller asked for, so the call did its job.
+        if (failure.code === alreadyFavoritedCode || failure.code === notBookmarkedCode) {
+          return { ok: true }
+        }
+        await this.debugLogger?.log('twitter.setBookmark.refused', { operationName, tweetId: args.tweetId, status, code: failure.code, transactionIdSent: this.lastTransactionIdSent, body: safeJsonSnippet(body) })
         return { ok: false, ...failure }
       } catch (error) {
         return { ok: false, error: errorMessage(error) }

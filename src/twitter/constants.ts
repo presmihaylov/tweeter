@@ -11,14 +11,21 @@ export const fallbackQueryIds: Readonly<Record<string, string>> = {
   CreateTweet: 'wUgPBh9hEKhMMGlg8uDuFw',
   DeleteTweet: 'nxpZCY2K-I6QoFHAHeojFQ',
   FavoriteTweet: 'lI07N6Otwv1PhnEgXILM7A',
-  UnfavoriteTweet: 'ZYKSe-w7KEslx3JhSIk5LA'
+  UnfavoriteTweet: 'ZYKSe-w7KEslx3JhSIk5LA',
+  CreateBookmark: 'aoDbu3RHznuiSkQ9aNM67Q',
+  DeleteBookmark: 'Wlmlj2-xzyS1GN3a6cj-mQ'
 }
 
 export const tweetTextLimit = 280
 
 // X answers a second like on the same tweet with this code. The like the caller asked for
-// is already on the tweet, so the call did its job and the code is not a failure.
+// is already on the tweet, so the call did its job and the code is not a failure. A second
+// bookmark answers with the same code, and with the same "already favorited" wording.
 export const alreadyFavoritedCode = 139
+
+// The other direction: X refuses to remove a bookmark that the account does not hold, and
+// says the tweet "was not found in actor's favorites". The tweet is already off the list.
+export const notBookmarkedCode = 144
 
 // X refuses a write with this code and the message "You have reached your daily limit for
 // sending Tweets and messages". The message is wrong: the same write passes seconds later,

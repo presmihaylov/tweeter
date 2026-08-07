@@ -32,6 +32,7 @@ export type AppTweet = {
   quotedTweetId?: string
   quotedTweet?: AppTweet
   favorited?: boolean
+  bookmarked?: boolean
   retweeted?: boolean
   // Set when the timeline carried this tweet because somebody reposted it. Every other
   // field belongs to the original tweet, the way x.com shows a repost.

@@ -67,6 +67,7 @@ Pasting the full `Cookie` request header is the most reliable route, because X s
 - `v` — hand the open tweet's video to your system player
 - `o` — open the open tweet in your browser
 - `l` — like the open tweet, or take the like back
+- `b` — bookmark the open tweet, or take the bookmark off
 - `r` — reply to the open tweet; type, then `Enter` sends and `Esc` closes
 - `t` — repost the open tweet with your own words; the same drawer opens and posts a quote
 - `q` — quit
@@ -141,11 +142,15 @@ Error 226 is the other refusal, and it is a different animal. It means the autom
 
 `l` likes the open tweet and `l` again takes the like back. It is one GraphQL mutation each way, `FavoriteTweet` and `UnfavoriteTweet`, both answering with the string `"Done"`. The card moves first and the request follows, so the heart fills the moment you press the key; a refusal puts the count and the heart back where they were and reports the reason. X answers a second like on the same tweet with error 139, which only means the like is already there, so that counts as success. One tweet takes one call at a time, or a fast double press would race itself.
 
+`b` bookmarks the open tweet and `b` again takes the bookmark off, through `CreateBookmark` and `DeleteBookmark`. It behaves like the like in every way that matters: optimistic, rolled back on refusal, one call per tweet at a time, and X's repeat codes counted as success in both directions (139 for a bookmark already there, 144 for one already gone). A bookmark is private, so the card only shows a `⚑` when you hold one and the counts line in the detail pane carries the number. `CreateBookmark` is stricter than the like endpoints in one way: it verifies `x-client-transaction-id` and answers a bad one with a bare 404, so a stale generator looks exactly like a dead query ID. The next section says how to tell them apart.
+
 X's automation check is the one thing that can break this without warning. A run of `error 226` that the ladder cannot outwait means one of two things. Either the gate is shut on the account for a while, which quiet time clears, or X tightened the heuristic and the headers no longer pass. The debug log tells them apart: `twitter.createTweet.refused` records `transactionIdSent`, so a false value points at the fingerprint. The fix for that is in `HeaderBuilder.baseHeaders` in `src/twitter/headers.ts`, which is the single place the browser fingerprint headers are set.
 
 One header is built per request rather than in `HeaderBuilder`: `x-client-transaction-id`. `src/twitter/transactionId.ts` derives it the way the x.com bundle does, because its value covers the request path and method. The bundle reads a 48-byte key from the `twitter-site-verification` meta tag of the signed-in shell, plays one of four hidden SVG loading animations at a frame the key picks, reads the resulting CSS `color` and `transform` back, and hashes that together with the path, the method and a timestamp counted from 2023-05-01. The result is 70 bytes, XOR-masked with a random first byte and base64-encoded. `PageContextStore` fetches the shell once per session and holds it, the way a browser tab holds one page load.
 
-Two details of that animation are Chrome behaviour, not CSS behaviour, and both change the answer: Blink prints matrix components with C's `%.6g`, so `3.41315e-05` where JavaScript prints `0.0000341315`, and its cubic-bezier solver is an 11-entry sample table, not an exact solve. `tests/transactionId.test.ts` replays 81 ids captured from the real in-page generator; they all have to match byte for byte.
+Two details of that animation are Chrome behaviour, not CSS behaviour, and both change the answer: Blink prints matrix components with C's `%.6g`, so `3.41315e-05` where JavaScript prints `0.0000341315`, and its cubic-bezier solver is an 11-entry sample table, not an exact solve. `tests/transactionId.test.ts` replays 120 ids captured from the real in-page generator; they all have to match byte for byte.
+
+Which bytes of the key pick the animation, the frame and the pause is the part X moves. It shipped a new `ondemand.s.*.js` that moved the frame byte from 7 to 12 and the pause bytes from 30/47/2 to 1/28/29, and from then on every request signed by the old indices carried a wrong header. Reads and likes did not care, because they do not check it, so the only symptom was `CreateBookmark` returning 404. The three index groups sit at the top of `computeAnimationKey` in `src/twitter/transactionId.ts` and the fixture test pins them. To find them again after a rotation: hook `crypto.subtle.digest` in a real x.com tab to read the preimage the page hashes, capture a handful of samples, and search the 4 x 16 x 16³ index space for the triple that reproduces all of them. The capture needs no account, because the verification key and the four loading animations are on the logged-out shell too, which is where the fixture comes from.
 
 The generator fails open. A shell that cannot be parsed means the header is omitted and the request still goes out, because reads worked without it before this existed. Every miss lands in the debug log as `twitter.transactionId.noPageContext` or `twitter.transactionId.failed`. A refused write drops the cached page data, since a rotated key is one of the few things that can make an otherwise good request look wrong.
 
@@ -205,9 +210,10 @@ Implemented:
 - chafa media preview helper + external open/copy helpers
 - normalized state reducer/store helpers
 - `l` to like or unlike the open tweet, drawn as a filled `♥` on the count, applied optimistically and rolled back on refusal
+- `b` to bookmark or unbookmark the open tweet, drawn as a `⚑` on the card, applied the same way
 - `R` refreshes from the top cursor and prepends what is new, while the older pages page in from the bottom cursor on their own as the selection nears the end
-- automatic retry with backoff on X's transient write refusal (error 344) and on its automation gate (error 226, up to 5 retries over 230s), for both replies and likes
-- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, the cookie write path and its refusal codes, OAuth flow, media helpers
+- automatic retry with backoff on X's transient write refusal (error 344) and on its automation gate (error 226, up to 5 retries over 230s), for replies, likes and bookmarks
+- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, the cookie write path and its refusal codes, OAuth flow, media helpers
 
 Live X GraphQL endpoints can still break when operation IDs or response shapes change; query ID refresh and tests are set up to make those failures visible. Replies additionally depend on X's automation heuristic, which X can tighten at any time.
 

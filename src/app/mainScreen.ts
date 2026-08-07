@@ -352,7 +352,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   })
   const headerKeys = new TextRenderable(renderer, {
     id: 'main-header-keys',
-    content: 'R refresh Tab feed s sort j/k feed ←/→ focus ↑/↓ move Shift+→ open Enter more l like r reply t quote p photo v video o open q quit',
+    content: 'R refresh Tab feed s sort j/k feed ←/→ focus ↑/↓ move Shift+→ open Enter more l like b mark r reply t quote p photo v video o open q quit',
     fg: '#58a6ff',
     width: 130,
     height: 1,
@@ -1309,8 +1309,13 @@ export const postedPill = (tweet: AppTweet | undefined, now: Date): string => {
 export const likeCount = (tweet: AppTweet): string =>
   `${tweet.favorited === true ? '♥ ' : ''}${tweet.metrics.likes ?? 0} likes`
 
+// A bookmark is private, so the count says little and the card is narrow. The card shows
+// only whether this reader holds one; the detail pane below carries the number.
+export const bookmarkCount = (tweet: AppTweet): string =>
+  `${tweet.bookmarked === true ? '⚑ ' : ''}${tweet.metrics.bookmarks ?? 0} bookmarks`
+
 const cardMetrics = (tweet: AppTweet): string =>
-  `${tweet.metrics.replies ?? 0} replies   ${tweet.metrics.reposts ?? 0} reposts   ${likeCount(tweet)}`
+  `${tweet.metrics.replies ?? 0} replies   ${tweet.metrics.reposts ?? 0} reposts   ${likeCount(tweet)}${tweet.bookmarked === true ? '   ⚑' : ''}`
 
 export const feedName = (feed: FeedId): string => (feed === 'following' ? 'Following' : 'For You')
 
@@ -1456,6 +1461,11 @@ export const metricsLine = (tweet: AppTweet): string => {
     `${tweet.metrics.reposts ?? 0} reposts`,
     likeCount(tweet)
   ]
+  // The row is already tight and X leaves the bookmark count out of most timelines, so it
+  // earns its place only when there is something to say.
+  if (tweet.metrics.bookmarks !== undefined || tweet.bookmarked === true) {
+    counts.push(bookmarkCount(tweet))
+  }
   if (tweet.metrics.views !== undefined) {
     counts.push(`${tweet.metrics.views} views`)
   }

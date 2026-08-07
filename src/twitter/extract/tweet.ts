@@ -59,6 +59,7 @@ export const mapTweetResult = (result: unknown, quoteDepth = 1): AppTweet | unde
     quotedTweetId: quotedTweet?.id,
     quotedTweet,
     favorited: getBool(legacy, 'favorited') || undefined,
+    bookmarked: getBool(legacy, 'bookmarked') || undefined,
     retweeted: getBool(legacy, 'retweeted') || undefined,
     article: extractArticle(unwrapped)
   })

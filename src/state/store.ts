@@ -103,6 +103,27 @@ export const applyLike = (state: AppState, tweetId: string, liked: boolean): App
   return { ...state, tweets }
 }
 
+const withBookmark = (tweet: AppTweet, bookmarked: boolean): AppTweet => ({
+  ...tweet,
+  bookmarked,
+  metrics: { ...tweet.metrics, bookmarks: Math.max(0, (tweet.metrics.bookmarks ?? 0) + (bookmarked ? 1 : -1)) }
+})
+
+// Same two copies as applyLike: the tweet on its own, and the tweet inside the one that
+// quotes it.
+export const applyBookmark = (state: AppState, tweetId: string, bookmarked: boolean): AppState => {
+  const target = state.tweets[tweetId]
+  if (!target || (target.bookmarked ?? false) === bookmarked) {
+    return state
+  }
+  const tweets: Record<string, AppTweet> = {}
+  for (const [id, tweet] of Object.entries(state.tweets)) {
+    const base = id === tweetId ? withBookmark(tweet, bookmarked) : tweet
+    tweets[id] = tweet.quotedTweet?.id === tweetId ? { ...base, quotedTweet: withBookmark(tweet.quotedTweet, bookmarked) } : base
+  }
+  return { ...state, tweets }
+}
+
 // Where a fetched page belongs. X hands back two cursors per page and they point opposite
 // ways: the top one asks for what arrived since, the bottom one asks for the next page down.
 export type PagePlacement = 'top' | 'bottom'
