@@ -4,12 +4,12 @@ import { TwitterClient } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, deleteFromDraft, enterSelection, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeTimelinePage, moveComposerCaret, needsOlderTweets, needsReplies, openComposer, previewOf, previewsOf, selectFirstReply, selectRelativeDetail, selectRelativeTweet, setFeedSort, toggleLightbox, videoOf, type AppState, type FeedId, type TimelineState } from '../state/store.ts'
-import { createMainScreen, retryStatus, writeFailure } from './mainScreen.ts'
+import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, deleteFromDraft, enterSelection, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeTimelinePage, moveComposerCaret, needsOlderTweets, needsReplies, openComposer, previewOf, previewsOf, selectFirstReply, selectRelativeDetail, scrollHelp, selectRelativeTweet, setFeedSort, toggleHelp, toggleLightbox, videoOf, type AppState, type FeedId, type TimelineState } from '../state/store.ts'
+import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
-import { caretMoveFor, isCtrlEnterKey, isEnterKey, isTextInput } from './keyEvents.ts'
+import { caretMoveFor, helpScrollStep, isCtrlEnterKey, isEnterKey, isHelpKey, isTextInput } from './keyEvents.ts'
 import { createImageLayer, writeToTerminal, type ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize } from '../media/geometry.ts'
 import { detectImageRenderer } from '../media/detect.ts'
@@ -101,6 +101,10 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     const screen = createMainScreen(renderer, {
       onOpenPhoto: openPhoto,
       onCloseLightbox: closePhoto,
+      onCloseHelp: () => {
+        state = closeHelp(state)
+        rerender()
+      },
       onOpenQuote: () => { openSelection() },
       onOpenTweet: (tweetId) => { openSelection(tweetId) },
       onOpenArticleImage: openArticleImage
@@ -306,6 +310,27 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       // An enlarged photo swallows q and Esc; quitting from it would surprise the reader.
       if (state.lightbox && (key.name === 'q' || key.name === 'escape' || key.name === 'p' || isEnterKey(key))) {
         closePhoto()
+        return
+      }
+      // The popup is modal while it is up, so a stray j does not walk a feed the reader
+      // cannot see. Only the keys that close it, and the ones that scroll it, act.
+      if (state.helpOpen) {
+        if (isHelpKey(key) || key.name === 'q' || key.name === 'escape' || isEnterKey(key)) {
+          state = closeHelp(state)
+          rerender()
+          return
+        }
+        const step = helpScrollStep(key)
+        if (step !== 0) {
+          state = scrollHelp(state, step, helpScrollMax(renderer.terminalWidth, renderer.terminalHeight))
+          rerender()
+        }
+        return
+      }
+      // The drawer is a text field, so ? belongs in the draft rather than on the screen.
+      if (isHelpKey(key) && !state.composer.open) {
+        state = toggleHelp(state)
+        rerender()
         return
       }
       if (key.name === 'q' && !state.composer.open) {

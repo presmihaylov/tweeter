@@ -21,6 +21,7 @@ export type MainScreen = {
 export type MainScreenOptions = {
   onOpenPhoto?: (source: 'tweet' | 'quote', index?: number) => void
   onCloseLightbox?: () => void
+  onCloseHelp?: () => void
   onOpenQuote?: () => void
   onOpenTweet?: (tweetId: string) => void
   onOpenArticleImage?: (media: AppMedia, key: string) => void
@@ -309,6 +310,117 @@ type ImageSlot = {
 // are, because the open tweet changes how many pictures the row holds.
 type TileRow = { tiles: BoxRenderable[]; slots: ImageSlot[] }
 
+export type HelpGroup = { title: string; entries: readonly { keys: string; what: string }[] }
+
+export const helpHint = '? keys'
+
+// Every key the app answers, in the three groups a reader thinks in: moving around the
+// feed, acting on the tweet in front of them, and typing in the drawer.
+export const helpGroups: readonly HelpGroup[] = [
+  {
+    title: 'Move around',
+    entries: [
+      { keys: 'j / k', what: 'walk the feed' },
+      { keys: 'Tab', what: 'Following or For You' },
+      { keys: 's', what: 'sort Following' },
+      { keys: 'R', what: 'refresh, newest on top' },
+      { keys: '→ / ←', what: 'aim the arrows: text, replies, feed' },
+      { keys: '↑ / ↓', what: 'move the aim, or scroll the text' },
+      { keys: 'Shift+↑ / ↓', what: 'walk the replies from the feed' },
+      { keys: 'Shift+→', what: 'open the card under the aim' },
+      { keys: 'Shift+←', what: 'back to the tweet you came from' },
+      { keys: 'Ctrl+W / Ctrl+S', what: 'scroll a long tweet up or down' },
+      { keys: 'Enter', what: 'load more replies' }
+    ]
+  },
+  {
+    title: 'Act on a tweet',
+    entries: [
+      { keys: 'l', what: 'like, or take the like back' },
+      { keys: 'b', what: 'bookmark, or take it off' },
+      { keys: 'r', what: 'reply' },
+      { keys: 't', what: 'repost with your own words' },
+      { keys: 'p', what: 'enlarge a photo' },
+      { keys: 'v', what: 'play the video' },
+      { keys: 'o', what: 'open in your browser' },
+      { keys: '?', what: 'this popup, on and off' },
+      { keys: 'q', what: 'quit' }
+    ]
+  },
+  {
+    title: 'Write a reply or a quote',
+    entries: [
+      { keys: 'Enter', what: 'send' },
+      { keys: 'Esc', what: 'close and keep the draft' },
+      { keys: '← / →', what: 'move the caret' },
+      { keys: 'Alt+← / Alt+→', what: 'jump a word' },
+      { keys: 'Home / End', what: 'the two ends of the line' },
+      { keys: 'Ctrl+A / Ctrl+E', what: 'the same two ends' },
+      { keys: 'Backspace', what: 'take the character before' },
+      { keys: 'Delete', what: 'take the character after' }
+    ]
+  }
+]
+
+// The keys of one group all start in the same column, so the descriptions line up.
+export const helpColumn = (group: HelpGroup): string => {
+  const width = Math.max(...group.entries.map((entry) => entry.keys.length)) + 2
+  return group.entries.map((entry) => `${entry.keys.padEnd(width)}${entry.what}`).join('\n')
+}
+
+// What the column asks for before the popup shares out what is left. Without it the three
+// columns split the row evenly, and the widest one wraps while the narrow ones sit empty.
+export const helpColumnWidth = (group: HelpGroup): number =>
+  Math.max(group.title.length, ...helpColumn(group).split('\n').map((line) => line.length))
+
+// The title row, the blank row under it, and one row for each key.
+const helpGroupRows = (group: HelpGroup): number => group.entries.length + 2
+
+const helpColumnGap = 4
+
+const stackWidth = (stack: readonly HelpGroup[]): number => Math.max(...stack.map(helpColumnWidth))
+
+const packHelpGroups = (count: number): readonly HelpGroup[][] => {
+  const stacks: HelpGroup[][] = Array.from({ length: count }, () => [])
+  const rows: number[] = Array.from({ length: count }, () => 0)
+  for (const group of helpGroups) {
+    const shortest = rows.indexOf(Math.min(...rows))
+    stacks[shortest]?.push(group)
+    rows[shortest] = (rows[shortest] ?? 0) + helpGroupRows(group)
+  }
+  return stacks
+}
+
+// Three stacks side by side need a wide terminal. A narrow one gets fewer and taller stacks,
+// because a column squeezed below its widest line wraps every description in it.
+export const helpStacks = (width: number): readonly (readonly HelpGroup[])[] => {
+  for (const count of [3, 2]) {
+    const stacks = packHelpGroups(count)
+    if (helpCardWidth(stacks) <= width) {
+      return stacks
+    }
+  }
+  return packHelpGroups(1)
+}
+
+// The two border columns and the two padding columns the card adds around its stacks.
+export const helpCardWidth = (stacks: readonly (readonly HelpGroup[])[]): number =>
+  stacks.reduce((total, stack) => total + stackWidth(stack), 0) + helpColumnGap * (stacks.length - 1) + 4
+
+export const helpCardHeight = (stacks: readonly (readonly HelpGroup[])[]): number =>
+  Math.max(...stacks.map((stack) => stack.reduce((total, group) => total + helpGroupRows(group), stack.length - 1))) + 4
+
+// The card starts under the header and stops above the status row.
+const helpTop = 3
+
+export const helpPopupHeight = (terminalWidth: number, terminalHeight: number): number =>
+  Math.min(helpCardHeight(helpStacks(terminalWidth)), Math.max(7, terminalHeight - helpTop - 2))
+
+// One stack of every key needs about forty rows, which a short terminal does not have. What
+// does not fit scrolls, so no key is out of reach on any window.
+export const helpScrollMax = (terminalWidth: number, terminalHeight: number): number =>
+  helpCardHeight(helpStacks(terminalWidth)) - helpPopupHeight(terminalWidth, terminalHeight)
+
 export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions = {}): MainScreen => {
   const now = opts.now ?? ((): Date => new Date())
   const shell = new BoxRenderable(renderer, {
@@ -350,14 +462,14 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     truncate: true,
     height: 1
   })
+  // Every key the app answers used to sit on this row, and each new one pushed the right
+  // border off a narrow window. The row now names the one key that shows the rest.
   const headerKeys = new TextRenderable(renderer, {
     id: 'main-header-keys',
-    content: 'R refresh Tab feed s sort j/k feed ←/→ focus ↑/↓ move Shift+→ open Enter more l like b mark r reply t quote p photo v video o open q quit',
+    content: helpHint,
     fg: '#58a6ff',
-    width: 130,
+    width: 20,
     height: 1,
-    // Two more hints made the row wider than a 173-column window, which pushed the right
-    // border off the screen. Shrinking beats overflowing.
     flexShrink: 1,
     truncate: true
   })
@@ -791,11 +903,118 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   })
   status.add(statusText)
 
+  // The popup floats over the panes rather than replacing them, so the reader keeps their
+  // place in the feed. It is the last child and sits above the rest, because a box that
+  // shares the row with the panes would push them aside instead of covering them.
+  // The bordered card wants its own width, and an absolute box can only pin an edge, so a
+  // full-width row that centres one child is what puts the card in the middle.
+  const helpPopup = new BoxRenderable(renderer, {
+    id: 'help-popup',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: helpTop,
+    height: 1,
+    zIndex: 100,
+    shouldFill: false,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    visible: false
+  })
+  const helpCard = new BoxRenderable(renderer, {
+    id: 'help-card',
+    width: 1,
+    maxWidth: '98%',
+    height: '100%',
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: '#58a6ff',
+    title: ' Keys ',
+    titleAlignment: 'center',
+    bottomTitle: ' ? or Esc closes ',
+    bottomTitleAlignment: 'center',
+    backgroundColor: '#0d1117',
+    padding: 1,
+    // The stacks are as tall as the key list, which a short terminal cannot show at once.
+    overflow: 'hidden',
+    flexDirection: 'column'
+  })
+  // The rows the card cannot show are scrolled to by lifting this box above its own top edge.
+  const helpScroller = new BoxRenderable(renderer, {
+    id: 'help-scroller',
+    width: '100%',
+    flexShrink: 0,
+    flexDirection: 'row',
+    gap: helpColumnGap
+  })
+  helpCard.add(helpScroller)
+  helpPopup.add(helpCard)
+
+  let helpStackCount = 0
+  // The card is rebuilt only when the terminal changes how many stacks fit, which is rare.
+  const layOutHelp = (scroll: number): void => {
+    const stacks = helpStacks(renderer.terminalWidth)
+    helpPopup.height = helpPopupHeight(renderer.terminalWidth, renderer.terminalHeight)
+    helpCard.width = helpCardWidth(stacks)
+    helpCard.bottomTitle = helpScrollMax(renderer.terminalWidth, renderer.terminalHeight) > 0
+      ? ' ↑ ↓ scrolls · ? or Esc closes '
+      : ' ? or Esc closes '
+    helpScroller.height = helpCardHeight(stacks) - 4
+    helpScroller.marginTop = -scroll
+    if (stacks.length === helpStackCount) {
+      return
+    }
+    helpStackCount = stacks.length
+    for (const child of helpScroller.getChildren()) {
+      helpScroller.remove(child.id)
+    }
+    stacks.forEach((groups, index) => {
+      const stack = new BoxRenderable(renderer, {
+        id: `help-stack-${index}`,
+        flexBasis: Math.max(...groups.map(helpColumnWidth)),
+        flexGrow: 1,
+        flexShrink: 1,
+        height: '100%',
+        flexDirection: 'column',
+        gap: 1
+      })
+      for (const group of groups) {
+        const slug = group.title.split(' ')[0]?.toLowerCase() ?? group.title
+        const column = new BoxRenderable(renderer, {
+          id: `help-column-${slug}`,
+          width: '100%',
+          flexShrink: 0,
+          flexDirection: 'column',
+          gap: 1
+        })
+        column.add(new TextRenderable(renderer, {
+          id: `help-column-title-${slug}`,
+          content: group.title,
+          fg: '#58a6ff',
+          width: '100%',
+          height: 1,
+          truncate: true
+        }))
+        column.add(new TextRenderable(renderer, {
+          id: `help-column-body-${slug}`,
+          content: helpColumn(group),
+          fg: '#c9d1d9',
+          width: '100%',
+          height: group.entries.length
+        }))
+        stack.add(column)
+      }
+      helpScroller.add(stack)
+    })
+  }
+  helpPopup.onMouseDown = () => { opts.onCloseHelp?.() }
+
   shell.add(header)
   shell.add(body)
   shell.add(lightbox)
   shell.add(composer)
   shell.add(status)
+  shell.add(helpPopup)
   renderer.root.add(shell)
 
   // The terminal draws its own cursor, so the drawer only says which cell it belongs in.
@@ -822,6 +1041,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   let quoteAvatarSlot: ImageSlot | undefined
   let detailAvatarSlot: ImageSlot | undefined
   let lightboxSlot: ImageSlot | undefined
+  let helpOpen = false
   let articleSlots: ImageSlot[] = []
   let bodyParts: Renderable[] = []
   let scrollTop = 0
@@ -1064,6 +1284,11 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       const timeline = state.timelines[state.activeFeed]
       body.visible = state.lightbox === undefined
       lightbox.visible = state.lightbox !== undefined
+      if (state.helpOpen) {
+        layOutHelp(state.helpScroll)
+      }
+      helpPopup.visible = state.helpOpen
+      helpOpen = state.helpOpen
       lightboxCaption.content = state.lightbox ? `${state.lightbox.label} · click or Esc to close` : ''
       lightboxSlot = state.lightbox
         ? { key: state.lightbox.key, url: state.lightbox.url, box: lightboxImage, pane: lightbox, width: state.lightbox.width, height: state.lightbox.height, minRows: mediaFloor }
@@ -1154,6 +1379,11 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     },
     placements() {
       const cell = cellSize(renderer.resolution, renderer.terminalWidth, renderer.terminalHeight, process.env.TWEETER_CELL_PX)
+      // A picture is painted on top of the terminal grid, not into it, so an avatar under
+      // the popup would show through it. The popup owns the screen while it is open.
+      if (helpOpen) {
+        return []
+      }
       // The hidden panes keep their last measured size, so the lightbox states outright
       // that it owns the screen rather than relying on their boxes collapsing.
       if (lightboxSlot) {

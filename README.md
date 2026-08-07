@@ -51,6 +51,11 @@ Pasting the full `Cookie` request header is the most reliable route, because X s
 
 ## Keys
 
+`?` opens a popup that lists every key below, in three groups: moving around, acting on a tweet, and writing in the drawer. The header carries a `? keys` hint instead of the row of shortcuts it used to, because each new key pushed that row's right edge off a narrow window. The popup floats over the panes rather than replacing them, so the feed keeps its place; `?`, `Esc`, `Enter`, `q` or a click closes it, and it swallows every other key while it is up.
+
+The card lays itself out for the window it opens in. Its three columns collapse into two, then one, on a terminal too narrow to hold them side by side, rather than wrapping a description away from the key it belongs to; the groups are shared out to keep the stacks the same height. One stack of every key runs about forty rows, more than a short window has, so what does not fit scrolls with `↑` / `↓`, `j` / `k` or `PgUp` / `PgDn`, and the bottom border says so only when there is something to scroll to.
+
+- `?` — open or close the key popup
 - `j` / `k` — move the feed selection, whatever the arrows are pointed at
 - `Tab` — switch between Following and For You
 - `s` — sort Following by Popular or Recent
@@ -211,9 +216,10 @@ Implemented:
 - normalized state reducer/store helpers
 - `l` to like or unlike the open tweet, drawn as a filled `♥` on the count, applied optimistically and rolled back on refusal
 - `b` to bookmark or unbookmark the open tweet, drawn as a `⚑` on the card, applied the same way
+- `?` floats a key popup over the panes, in three columns that collapse to two and then one on a narrow terminal, and scroll when the window is too short
 - `R` refreshes from the top cursor and prepends what is new, while the older pages page in from the bottom cursor on their own as the selection nears the end
 - automatic retry with backoff on X's transient write refusal (error 344) and on its automation gate (error 226, up to 5 retries over 230s), for replies, likes and bookmarks
-- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, the cookie write path and its refusal codes, OAuth flow, media helpers
+- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, the key popup and its reflow, the cookie write path and its refusal codes, OAuth flow, media helpers
 
 Live X GraphQL endpoints can still break when operation IDs or response shapes change; query ID refresh and tests are set up to make those failures visible. Replies additionally depend on X's automation heuristic, which X can tighten at any time.
 

@@ -36,7 +36,7 @@ Usage:
   tweeter auth twitter --client-id <id> [--profile name] [--port N] [--no-browser]
 
 Keys:
-  q quit, R refresh, Tab switch feed, j/k select, Enter load replies, r reply
+  ? shows every key in a popup. q quit, R refresh, Tab switch feed, j/k select.
 `
 
 const authTwitterUsage = `tweeter auth twitter

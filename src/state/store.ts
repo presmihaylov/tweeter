@@ -52,6 +52,11 @@ export type AppState = {
   // arrows: ↑/↓ scroll it here instead of moving a cursor. Never true together with
   // selectedDetailId, because both would answer the same key.
   textFocused: boolean
+  // The key list outgrew the header row, so it lives in a popup that ? opens and closes.
+  helpOpen: boolean
+  // A short terminal cannot hold every key at once, so the popup scrolls. The screen owns
+  // how far it can go, because only the screen knows how many rows it has.
+  helpScroll: number
   status: string
 }
 
@@ -67,8 +72,20 @@ export const initialAppState = (): AppState => ({
   composer: { open: false, mode: 'reply', draft: '', caret: 0, sending: false },
   detailStack: [],
   textFocused: false,
+  helpOpen: false,
+  helpScroll: 0,
   status: 'starting'
 })
+
+export const toggleHelp = (state: AppState): AppState => ({ ...state, helpOpen: !state.helpOpen, helpScroll: 0 })
+
+export const closeHelp = (state: AppState): AppState =>
+  state.helpOpen ? { ...state, helpOpen: false, helpScroll: 0 } : state
+
+export const scrollHelp = (state: AppState, delta: number, max: number): AppState => {
+  const helpScroll = Math.max(0, Math.min(max, state.helpScroll + delta))
+  return helpScroll === state.helpScroll ? state : { ...state, helpScroll }
+}
 
 export const mergeTweets = (state: AppState, tweets: AppTweet[]): AppState => {
   const nextTweets = { ...state.tweets }

@@ -46,6 +46,26 @@ export const isTextInput = (key: AppKey): key is AppKey & { sequence: string } =
   key.sequence !== undefined && key.sequence !== '' && !key.ctrl && key.meta !== true
     && !hasControlChar(key.sequence)
 
+// Terminals disagree about ? : some name the key, some report the / it shares with Shift,
+// and some only carry the character in the sequence. All three mean the same press.
+export const isHelpKey = (key: AppKey): boolean =>
+  !key.ctrl && key.meta !== true && (key.name === '?' || (key.shift === true && key.name === '/') || key.sequence === '?')
+
+// How far the key popup moves. A short terminal cannot hold every key at once, so the same
+// keys that walk a list walk the popup, and the page keys jump a screen.
+export const helpScrollStep = (key: AppKey): number => {
+  if (key.name === 'down' || key.name === 'j') {
+    return 1
+  }
+  if (key.name === 'up' || key.name === 'k') {
+    return -1
+  }
+  if (key.name === 'pagedown' || key.name === 'space') {
+    return 10
+  }
+  return key.name === 'pageup' ? -10 : 0
+}
+
 export const isCtrlEnterKey = (key: AppKey): boolean => {
   if (key.ctrl && enterNames.has(key.name)) {
     return true
