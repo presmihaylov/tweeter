@@ -45,7 +45,7 @@ describe('timeline window', () => {
 describe('detail layout', () => {
   test('keeps rows for the photo when a quote card is also shown', () => {
     const layout = detailLayout(34, { photo: true, quote: true, quotePhoto: false, parent: false, textLines: 4 })
-    expect(layout).toEqual({ parent: 0, text: 4, media: 3, quote: 5, replies: 5 })
+    expect(layout).toEqual({ parent: 0, text: 3, media: 3, quote: 5, replies: 6 })
     expect(sum(layout, 8)).toBe(34 - 4)
   })
 
@@ -57,7 +57,7 @@ describe('detail layout', () => {
 
   test('prefers the tweet photo over the quoted photo when rows are scarce', () => {
     const layout = detailLayout(34, { photo: true, quote: true, quotePhoto: true, parent: false, textLines: 4 })
-    expect(layout).toEqual({ parent: 0, text: 4, media: 3, quote: 5, replies: 5 })
+    expect(layout).toEqual({ parent: 0, text: 3, media: 3, quote: 5, replies: 6 })
     expect(sum(layout, 8)).toBe(34 - 4)
   })
 
@@ -75,14 +75,14 @@ describe('detail layout', () => {
 
   test('borrows from the replies floor rather than lose the photo', () => {
     const layout = detailLayout(30, { photo: true, quote: true, quotePhoto: false, parent: false, textLines: 4 })
-    expect(layout).toEqual({ parent: 0, text: 4, media: 3, quote: 5, replies: 1 })
+    expect(layout).toEqual({ parent: 0, text: 3, media: 3, quote: 5, replies: 2 })
     expect(sum(layout, 8)).toBe(30 - 4)
   })
 
   test('drops a photo that would render as a sliver and returns its rows', () => {
     const layout = detailLayout(28, { photo: true, quote: true, quotePhoto: false, parent: false, textLines: 4 })
     expect(layout.media).toBe(0)
-    expect(layout.replies).toBe(2)
+    expect(layout.replies).toBe(3)
   })
 
   test('spends everything on the replies when there is no photo', () => {
@@ -103,10 +103,24 @@ describe('detail layout', () => {
     expect(sum(layout, 7)).toBe(50 - 4)
   })
 
-  test('caps the text even when no photo competes for the rows', () => {
+  test('holds a long tweet under its cap so the replies keep a whole card', () => {
     const layout = detailLayout(31, { photo: false, quote: false, quotePhoto: false, parent: false, textLines: 40 })
-    expect(layout).toEqual({ parent: 0, text: 12, media: 0, quote: 0, replies: 4 })
+    expect(layout).toEqual({ parent: 0, text: 10, media: 0, quote: 0, replies: 6 })
     expect(sum(layout, 6)).toBe(31 - 4)
+  })
+
+  // The reported case: a long tweet with a quote under it left the reply card one row.
+  test('a long tweet with a quote still leaves the replies a whole card', () => {
+    const layout = detailLayout(34, { photo: false, quote: true, quotePhoto: false, parent: false, textLines: 40 })
+    expect(layout.replies).toBe(6)
+    expect(layout.text).toBe(7)
+    expect(sum(layout, 7)).toBe(34 - 4)
+  })
+
+  test('a pane too short for both gives the replies what is over the text floor', () => {
+    const layout = detailLayout(28, { photo: false, quote: true, quotePhoto: false, parent: false, textLines: 40 })
+    expect(layout.text).toBe(3)
+    expect(layout.replies).toBe(4)
   })
 
   test('pays the parent card first and takes the rows from the photo', () => {
@@ -123,7 +137,7 @@ describe('detail layout', () => {
 
   test('drops the photo before the parent card when both cannot fit', () => {
     const layout = detailLayout(34, { photo: true, quote: true, quotePhoto: false, parent: true, textLines: 4 })
-    expect(layout).toEqual({ parent: 5, text: 4, media: 0, quote: 5, replies: 2 })
+    expect(layout).toEqual({ parent: 5, text: 3, media: 0, quote: 5, replies: 3 })
     expect(sum(layout, 9)).toBe(34 - 4)
   })
 

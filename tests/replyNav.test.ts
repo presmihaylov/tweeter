@@ -244,6 +244,34 @@ describe('reply cards', () => {
     const harness = await setup(withReplies(0))
     expect(harness.frame).toContain('No replies yet.')
   })
+
+  // A long tweet with a quote under it used to leave the strip one row, which drew the card as
+  // an empty blue sliver. The strip lists one line for each reply instead.
+  test('a strip too short for a card lists the replies one line each', async () => {
+    const harness = await createTestRenderer({ width: 120, height: 30 })
+    const screen = createMainScreen(harness.renderer)
+    const long: AppTweet = {
+      ...tweet('1', Array.from({ length: 30 }, (_, index) => `line ${index} of a very long tweet body`).join(' ')),
+      quotedTweet: tweet('9', 'the quoted post')
+    }
+    const base = mergeTimelinePage(initialAppState(), 'following', [long, tweet('2')], {})
+    const state = selectRelativeDetail(mergeConversationPage(base, '1', [tweet('r0', 'reply body 0', '1'), tweet('r1', 'reply body 1', '1')]), 1)
+    screen.render(state)
+    await harness.flush()
+    screen.render(state)
+    await harness.flush()
+    const frame = harness.captureCharFrame()
+    // The marker says which reply the arrows are on, the way the border says it on a card.
+    expect(frame).toContain('▸ @ur0  reply body 0')
+    expect(frame).toContain('Replies · 1/2')
+    screen.destroy()
+  })
+
+  test('a pane with room draws the cards, not the lines', async () => {
+    const harness = await setup(selectRelativeDetail(withReplies(3), 1))
+    expect(harness.frame).not.toContain('▸ @ur0')
+    expect(harness.frame).toContain('1 replies   2 reposts   3 likes')
+  })
 })
 
 describe('automatic reply loading', () => {

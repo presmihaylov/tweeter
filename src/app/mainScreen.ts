@@ -70,10 +70,18 @@ export const detailLayout = (paneHeight: number, opts: { photo: boolean; quote: 
   // A short tweet gives its spare rows to the photo; a long one scrolls at the cap. An
   // article carries thousands of characters, so it keeps every row the pane can spare
   // above one reply card, or the reader would hold the scroll key for a page at a time.
-  const reserved = repliesFloor + (opts.photo ? mediaFloor : 0)
-  const cap = opts.article ? Math.max(detailTextCap, body - parent - quoteBase - reserved) : detailTextCap
-  const wanted = Math.min(cap, Math.max(detailTextFloor, opts.textLines))
-  const text = Math.max(0, Math.min(wanted, body - parent - quoteBase))
+  const textRoom = body - parent - quoteBase
+  const mediaWant = opts.photo ? mediaFloor : 0
+  const cap = opts.article ? Math.max(detailTextCap, textRoom - repliesFloor - mediaWant) : detailTextCap
+  const natural = Math.min(cap, Math.max(detailTextFloor, opts.textLines))
+  // The text used to claim its cap before the replies claimed anything, so a long tweet with a
+  // quote under it left the replies a clipped card or no card at all. The text scrolls under
+  // Ctrl+S and a reply strip does not, so the replies are paid first, down to what is left over
+  // the text floor. An article is the exception: it is thousands of characters, so it holds its
+  // cap and lets the strip go short.
+  const repliesWant = Math.min(repliesFloor, Math.max(0, textRoom - detailTextFloor - mediaWant))
+  const wanted = opts.article ? natural : Math.min(natural, Math.max(detailTextFloor, textRoom - repliesWant - mediaWant))
+  const text = Math.max(0, Math.min(wanted, textRoom))
   const rest = Math.max(0, body - parent - quoteBase - text)
   const quoteWanted = opts.quote && opts.quotePhoto
     ? Math.min(quotePhotoRows, Math.max(0, rest - repliesFloor - (opts.photo ? mediaFloor : 0)))
@@ -1201,7 +1209,11 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       replyCards.push(empty)
       return
     }
-    const capacity = replyCapacity(rows)
+    // A strip too short for a whole card would draw it as a clipped sliver, so it falls back to
+    // one line for each reply. Fewer words, but the reader still sees who answered.
+    const compact = rows < replyCardHeight
+    repliesList.gap = compact ? 0 : 1
+    const capacity = compact ? Math.max(1, rows) : replyCapacity(rows)
     replyTop = scrollWindow(ids.length, ids.indexOf(state.selectedDetailId ?? ''), capacity, replyTop)
     for (const id of ids.slice(replyTop, replyTop + capacity)) {
       const reply = state.tweets[id]
@@ -1209,6 +1221,20 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
         continue
       }
       const selected = id === state.selectedDetailId
+      if (compact) {
+        const line = new TextRenderable(renderer, {
+          id: `reply-line-${id}`,
+          content: replyLine(reply, selected),
+          fg: selected ? '#58a6ff' : '#c9d1d9',
+          width: '100%',
+          height: 1,
+          truncate: true
+        })
+        line.onMouseDown = () => { opts.onOpenTweet?.(id) }
+        repliesList.add(line)
+        replyCards.push(line)
+        continue
+      }
       const card = cardBox(renderer, `reply-card-${id}`, selected)
       const avatar = new BoxRenderable(renderer, { id: `reply-card-${id}-avatar`, width: avatarCols, height: avatarRows })
       const column = new BoxRenderable(renderer, { id: `reply-card-${id}-column`, flexGrow: 1, height: '100%', flexDirection: 'column' })
@@ -1737,6 +1763,11 @@ export const noticeHint = (notice: AppNotice, opened: boolean): string => {
   }
   return `${opened ? 'Enter closes' : 'Enter opens'} ${notice.list.title}`
 }
+
+// One reply on one row, for a strip with no room for a card. The marker is what the border
+// says on a card: this is the one the arrows are on.
+export const replyLine = (reply: AppTweet, selected: boolean): string =>
+  `${selected ? '▸' : ' '} @${reply.author.handle}  ${decodeEntities(reply.text).replaceAll('\n', ' ')}`
 
 export const repliesTitle = (total: number, index: number): string => {
   if (total === 0) {
