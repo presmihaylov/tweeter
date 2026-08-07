@@ -1,5 +1,7 @@
 export * from './article.ts'
 export * from './cursor.ts'
+export * from './legacyTweet.ts'
 export * from './media.ts'
+export * from './notifications.ts'
 export * from './text.ts'
 export * from './tweet.ts'

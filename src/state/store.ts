@@ -1,6 +1,11 @@
-import type { AppMedia, AppTweet, AppVideo } from '../twitter/types.ts'
+import type { AppMedia, AppTweet, AppVideo, NotificationPage, NotificationRow } from '../twitter/types.ts'
 
 export type FeedId = 'following' | 'forYou'
+
+// Notifications are a third tab but not a third feed: they hold rows, and a row is either a
+// tweet or an aggregated line. Keeping the two apart lets the type checker prove that every
+// place which needs a timeline still names one of the two tweet feeds.
+export type TabId = FeedId | 'notifications'
 
 // What x.com calls "Sort by" on the Following tab. Recent is what X gives a client that
 // asks for nothing, so it stays the default here too.
@@ -13,6 +18,17 @@ export type TimelineState = {
   bottomCursor?: string
   loading: boolean
   error?: string
+}
+
+export type NotificationsState = {
+  rows: NotificationRow[]
+  topCursor?: string
+  bottomCursor?: string
+  loading: boolean
+  error?: string
+  // What x.com puts on its own tab as a blue dot. This app only reads it, so it clears when
+  // x.com clears it and not before.
+  unread: number
 }
 
 export type ConversationState = {
@@ -35,11 +51,15 @@ export type CaretMove = 'left' | 'right' | 'start' | 'end' | 'wordLeft' | 'wordR
 
 export type AppState = {
   tweets: Record<string, AppTweet>
-  activeFeed: FeedId
+  activeTab: TabId
   feedSort: FeedSort
   timelines: Record<FeedId, TimelineState>
+  notifications: NotificationsState
   conversations: Record<string, ConversationState>
   selectedTweetId?: string
+  // The notifications tab walks rows, not tweets, so it keeps its own cursor. A row names
+  // the tweet it is about, and focusedTweetId reads it from here while that tab is up.
+  selectedRowKey?: string
   composer: { open: boolean; mode: ComposerMode; targetTweetId?: string; draft: string; caret: number; error?: string; sending: boolean }
   lightbox?: LightboxState
   // Quoted tweets and replies are not in the timeline, so drilling into one pushes here
@@ -62,12 +82,13 @@ export type AppState = {
 
 export const initialAppState = (): AppState => ({
   tweets: {},
-  activeFeed: 'following',
+  activeTab: 'following',
   feedSort: 'recent',
   timelines: {
     following: { id: 'following', tweetIds: [], loading: false },
     forYou: { id: 'forYou', tweetIds: [], loading: false }
   },
+  notifications: { rows: [], loading: false, unread: 0 },
   conversations: {},
   composer: { open: false, mode: 'reply', draft: '', caret: 0, sending: false },
   detailStack: [],
@@ -176,6 +197,44 @@ export const mergeTimelinePage = (state: AppState, feed: FeedId, tweets: AppTwee
     timelines: { ...merged.timelines, [feed]: timeline },
     selectedTweetId: merged.selectedTweetId ?? tweetIds[0]
   }
+}
+
+// The same two cursors as a timeline page, and the same rule about an empty page down. A row
+// is keyed by its entry id, so a page that repeats a row drops the repeat.
+export const mergeNotificationsPage = (state: AppState, page: NotificationPage, placement: PagePlacement = 'bottom'): AppState => {
+  const merged = mergeTweets(state, page.tweets)
+  const existing = merged.notifications
+  const seen = new Set(existing.rows.map((row) => row.key))
+  const fresh = page.rows.filter((row) => !seen.has(row.key))
+  const rows = placement === 'top' ? [...fresh, ...existing.rows] : [...existing.rows, ...fresh]
+  const bottomCursor = fresh.length === 0 ? undefined : page.bottomCursor ?? existing.bottomCursor
+  return {
+    ...merged,
+    notifications: {
+      ...existing,
+      rows,
+      loading: false,
+      error: undefined,
+      topCursor: placement === 'top' ? page.topCursor ?? existing.topCursor : existing.topCursor ?? page.topCursor,
+      bottomCursor: placement === 'bottom' ? bottomCursor : existing.bottomCursor ?? page.bottomCursor
+    },
+    selectedRowKey: merged.selectedRowKey ?? rows[0]?.key
+  }
+}
+
+export const selectedRow = (state: AppState): NotificationRow | undefined =>
+  state.notifications.rows.find((row) => row.key === state.selectedRowKey)
+
+export const selectRelativeRow = (state: AppState, delta: number): AppState => {
+  const rows = state.notifications.rows
+  if (rows.length === 0) {
+    return state
+  }
+  const currentIndex = state.selectedRowKey ? rows.findIndex((row) => row.key === state.selectedRowKey) : 0
+  const base = currentIndex >= 0 ? currentIndex : 0
+  const nextIndex = Math.max(0, Math.min(rows.length - 1, base + delta))
+  const status = state.detailStack.length > 0 ? 'left quote' : state.status
+  return { ...state, selectedRowKey: rows[nextIndex]?.key, lightbox: undefined, detailStack: [], selectedDetailId: undefined, textFocused: false, status }
 }
 
 // A sort change makes the loaded page and its cursor stale: the cursor indexes the old
@@ -365,8 +424,18 @@ export const videoOf = (tweet: AppTweet | undefined): AppVideo | undefined =>
 
 // The detail pane, the replies and every shortcut act on this tweet, not on the
 // timeline cursor, so a drilled-in quote behaves like any other open tweet.
-export const focusedTweetId = (state: AppState): string | undefined =>
-  state.detailStack[state.detailStack.length - 1] ?? state.selectedTweetId
+// On the notifications tab the row under the cursor names the tweet instead, which is how
+// the detail pane, the like key and the reply key keep working there without a second path.
+export const focusedTweetId = (state: AppState): string | undefined => {
+  const opened = state.detailStack[state.detailStack.length - 1]
+  if (opened !== undefined) {
+    return opened
+  }
+  if (state.activeTab === 'notifications') {
+    return selectedRow(state)?.tweetId
+  }
+  return state.selectedTweetId
+}
 
 export const focusedTweet = (state: AppState): AppTweet | undefined => {
   const id = focusedTweetId(state)
@@ -435,12 +504,21 @@ export const needsReplies = (state: AppState): string | undefined => {
 const olderPageMargin = 5
 
 export const needsOlderTweets = (state: AppState): boolean => {
-  const timeline = state.timelines[state.activeFeed]
-  if (timeline.loading || timeline.bottomCursor === undefined || timeline.tweetIds.length === 0) {
+  const timeline = activeTimeline(state)
+  if (!timeline || timeline.loading || timeline.bottomCursor === undefined || timeline.tweetIds.length === 0) {
     return false
   }
   const index = state.selectedTweetId ? timeline.tweetIds.indexOf(state.selectedTweetId) : -1
   return index >= 0 && index >= timeline.tweetIds.length - olderPageMargin
+}
+
+export const needsOlderNotifications = (state: AppState): boolean => {
+  const { rows, loading, bottomCursor } = state.notifications
+  if (state.activeTab !== 'notifications' || loading || bottomCursor === undefined || rows.length === 0) {
+    return false
+  }
+  const index = state.selectedRowKey ? rows.findIndex((row) => row.key === state.selectedRowKey) : -1
+  return index >= 0 && index >= rows.length - olderPageMargin
 }
 
 // The plain ← hands the arrows back to the feed without leaving the open tweet.
@@ -506,9 +584,14 @@ export const leaveSelection = (state: AppState): AppState => {
   }
 }
 
+// The two tweet feeds each hold a timeline; the notifications tab holds rows instead, so it
+// answers with nothing and the callers say what to do about it.
+export const activeTimeline = (state: AppState): TimelineState | undefined =>
+  state.activeTab === 'notifications' ? undefined : state.timelines[state.activeTab]
+
 export const selectRelativeTweet = (state: AppState, delta: number): AppState => {
-  const timeline = state.timelines[state.activeFeed]
-  if (timeline.tweetIds.length === 0) {
+  const timeline = activeTimeline(state)
+  if (!timeline || timeline.tweetIds.length === 0) {
     return state
   }
   const currentIndex = state.selectedTweetId ? timeline.tweetIds.indexOf(state.selectedTweetId) : 0

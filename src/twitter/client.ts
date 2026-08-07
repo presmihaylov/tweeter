@@ -1,4 +1,4 @@
-import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, notBookmarkedCode, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
+import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, notBookmarkedCode, notificationParams, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
 import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildTweetDetailFeatures } from './features.ts'
 import { GraphQLClient } from './graphql.ts'
 import { HeaderBuilder } from './headers.ts'
@@ -6,9 +6,9 @@ import { PageContextStore } from './pageContext.ts'
 import { QueryIdStore } from './queryIds.ts'
 import { generateTransactionId } from './transactionId.ts'
 import { statusUrl } from './urls.ts'
-import type { AuthStatus, ConversationPage, DeleteResult, LikeResult, PostResult, TimelinePage, TweetBundle, TwitterClientOptions, WriteRetryNotice } from './types.ts'
-import { extractCursorFromInstructions, getHomeInstructions, getTweetDetailInstructions, parseConversationTweets, parseHomeTweets } from './extract/index.ts'
-import { getMap, getSlice, getStr, isRecord } from '../utils/guards.ts'
+import type { AuthStatus, BadgeCounts, ConversationPage, DeleteResult, LikeResult, NotificationPage, PostResult, TimelinePage, TweetBundle, TwitterClientOptions, WriteRetryNotice } from './types.ts'
+import { extractCursorFromInstructions, getHomeInstructions, getTweetDetailInstructions, parseConversationTweets, parseHomeTweets, parseNotificationsPage } from './extract/index.ts'
+import { getInt, getMap, getSlice, getStr, isRecord } from '../utils/guards.ts'
 import type { Fetcher } from '../utils/fetcher.ts'
 import { defaultFetcher } from '../utils/fetcher.ts'
 import { errorMessage } from '../utils/result.ts'
@@ -128,6 +128,43 @@ export class TwitterClient {
       tweets: parseHomeTweets(instructions),
       topCursor: extractCursorFromInstructions(instructions, 'Top'),
       bottomCursor: extractCursorFromInstructions(instructions, 'Bottom')
+    }
+  }
+
+  // The notifications tab is the one read X never moved to GraphQL, so it goes over the old
+  // REST API. That path needs no x-client-transaction-id: every probe answered 200 without it.
+  async loadNotificationsPage(args: { count: number; cursor?: string }): Promise<NotificationPage> {
+    const params = new URLSearchParams(notificationParams)
+    params.set('count', String(args.count))
+    params.set('requestContext', args.cursor ? 'scroll' : 'launch')
+    if (args.cursor) {
+      params.set('cursor', args.cursor)
+    }
+    const body = await this.restGet(`/i/api/2/notifications/all.json?${params.toString()}`)
+    return parseNotificationsPage(body)
+  }
+
+  // What x.com puts on its own tab as a blue dot. It is a read, so it never clears the count;
+  // only x.com itself does that.
+  async loadBadgeCounts(): Promise<BadgeCounts> {
+    const body = await this.restGet('/i/api/2/badge_count/badge_count.json?supports_ntab_urt=1')
+    return { notifications: getInt(body, 'ntab_unread_count'), messages: getInt(body, 'dm_unread_count') }
+  }
+
+  private async restGet(path: string): Promise<unknown> {
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method: 'GET',
+      headers: this.headers.jsonHeaders({ referer: 'https://x.com/notifications' })
+    })
+    const text = await response.text()
+    if (!response.ok) {
+      await this.debugLogger?.log('twitter.rest.failed', { path, status: response.status, body: safeJsonSnippet(text) })
+      throw new Error(`X answered ${response.status} for ${path}`)
+    }
+    try {
+      return JSON.parse(text) as unknown
+    } catch {
+      throw new Error(`X answered ${path} with something that is not JSON`)
     }
   }
 

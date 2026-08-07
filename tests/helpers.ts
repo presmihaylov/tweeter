@@ -157,6 +157,102 @@ export const promotedThreadEntry = (tweet: unknown): unknown => {
   }
 }
 
+// The notifications endpoint is the old REST API. Everything below mirrors that shape, with
+// invented names, handles and text: a flat globalObjects map plus a timeline of entries that
+// only carry ids.
+export const legacyUser = (id: string, handle: string): unknown => ({
+  id_str: id,
+  screen_name: handle,
+  name: handle.toUpperCase(),
+  profile_image_url_https: `https://pbs.twimg.test/profile/${id}_normal.jpg`,
+  ext_is_blue_verified: false
+})
+
+export const legacyTweet = (id: string, userId: string, text: string, extra: Record<string, unknown> = {}): unknown => ({
+  id_str: id,
+  user_id_str: userId,
+  full_text: text,
+  created_at: 'Mon Jan 01 00:00:00 +0000 2024',
+  reply_count: 1,
+  retweet_count: 2,
+  favorite_count: 3,
+  quote_count: 4,
+  conversation_id_str: id,
+  entities: { hashtags: [], symbols: [], urls: [], user_mentions: [] },
+  ...extra
+})
+
+export const legacyPhoto = (): unknown => ({
+  id_str: '90001',
+  type: 'photo',
+  media_url_https: 'https://pbs.twimg.test/media/notice.jpg',
+  sizes: { large: { w: 1200, h: 800 }, small: { w: 680, h: 453 } },
+  ext_alt_text: 'a synthetic picture'
+})
+
+export const legacyNotice = (args: { id: string; icon: string; text: string; fromUserIds: string[]; targetTweetId?: string; timestampMs?: number }): unknown => ({
+  id: args.id,
+  icon: { id: args.icon },
+  message: { text: args.text, entities: args.fromUserIds.map((id) => ({ fromIndex: 0, toIndex: 3, ref: { user: { id } } })) },
+  template: {
+    aggregateUserActionsV1: {
+      fromUsers: args.fromUserIds.map((id) => ({ user: { id } })),
+      targetObjects: args.targetTweetId ? [{ tweet: { id: args.targetTweetId } }] : []
+    }
+  },
+  timestampMs: args.timestampMs ?? 1704067200000
+})
+
+export const noticeEntry = (noticeId: string, args: { fromUserIds: string[]; targetTweetId?: string }): unknown => ({
+  entryId: `notification-${noticeId}`,
+  sortIndex: '1786111112303',
+  content: {
+    item: {
+      clientEventInfo: { component: 'ntab' },
+      content: { notification: { id: noticeId, url: { urlType: 'ExternalUrl', url: 'https://x.test/status/1' }, fromUsers: args.fromUserIds, targetTweets: args.targetTweetId ? [args.targetTweetId] : [] } }
+    }
+  }
+})
+
+export const mentionEntry = (tweetId: string): unknown => ({
+  entryId: `tweet-${tweetId}`,
+  sortIndex: '1786111112300',
+  content: { item: { clientEventInfo: { component: 'ntab' }, content: { tweet: { id: tweetId, displayType: 'Tweet' } } } }
+})
+
+export const notificationsBody = (args: {
+  users?: unknown[]
+  tweets?: unknown[]
+  notices?: unknown[]
+  entries?: unknown[]
+  topCursor?: string
+  bottomCursor?: string
+}): unknown => {
+  const byId = (items: unknown[], key: string): Record<string, unknown> =>
+    Object.fromEntries(items.map((item) => [String((item as Record<string, string>)[key]), item]))
+  return {
+    globalObjects: {
+      users: byId(args.users ?? [], 'id_str'),
+      tweets: byId(args.tweets ?? [], 'id_str'),
+      notifications: byId(args.notices ?? [], 'id')
+    },
+    timeline: {
+      instructions: [
+        { clearCache: {} },
+        {
+          addEntries: {
+            entries: [
+              ...(args.entries ?? []),
+              { entryId: 'cursor-top-0', content: { operation: { cursor: { value: args.topCursor ?? 'notif-top', cursorType: 'Top' } } } },
+              { entryId: 'cursor-bottom-0', content: { operation: { cursor: { value: args.bottomCursor ?? 'notif-bottom', cursorType: 'Bottom' } } } }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
+
 export const tweetDetailBody = (tweet: unknown, replies: unknown[], extraEntries: unknown[] = []): unknown => ({
   data: {
     threaded_conversation_with_injections_v2: {

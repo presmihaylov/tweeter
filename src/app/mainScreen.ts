@@ -1,6 +1,6 @@
 import { BoxRenderable, CliRenderEvents, TextRenderable, type CliRenderer, type Renderable } from '@opentui/core'
-import { focusedTweet, parentIdOf, previewOf, previewsOf, replyIdsOf, type AppState, type ConversationState, type FeedId, type FeedSort } from '../state/store.ts'
-import type { AppMedia, AppTweet, AuthStatus, WriteRetryNotice } from '../twitter/types.ts'
+import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, replyIdsOf, type AppState, type ConversationState, type FeedSort, type NotificationsState, type TabId } from '../state/store.ts'
+import type { AppMedia, AppTweet, AuthStatus, NoticeIcon, NotificationRow, WriteRetryNotice } from '../twitter/types.ts'
 import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize, fitCells } from '../media/geometry.ts'
@@ -321,7 +321,7 @@ export const helpGroups: readonly HelpGroup[] = [
     title: 'Move around',
     entries: [
       { keys: 'j / k', what: 'walk the feed' },
-      { keys: 'Tab', what: 'Following or For You' },
+      { keys: 'Tab', what: 'Following, For You, Notifications' },
       { keys: 's', what: 'sort Following' },
       { keys: 'R', what: 'refresh, newest on top' },
       { keys: '→ / ←', what: 'aim the arrows: text, replies, feed' },
@@ -511,7 +511,8 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
 
   const rail = new BoxRenderable(renderer, {
     id: 'left-rail',
-    width: 18,
+    // Two columns of border and two of padding leave sixteen, which "● Notifications" fills.
+    width: 20,
     height: '100%',
     border: true,
     borderStyle: 'rounded',
@@ -523,7 +524,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   })
   const railTitle = new TextRenderable(renderer, {
     id: 'rail-title',
-    content: 'Feeds',
+    content: 'Tabs',
     fg: '#f0f6fc',
     width: '100%',
     height: 1
@@ -533,7 +534,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     content: '',
     fg: '#8b949e',
     width: '100%',
-    height: 5
+    height: 6
   })
   const railProfile = new TextRenderable(renderer, {
     id: 'rail-profile',
@@ -1244,72 +1245,156 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     }
   }
 
+  const emptyCard = (id: string, text: string): void => {
+    const empty = cardBox(renderer, id, false)
+    empty.add(new TextRenderable(renderer, { id: `${id}-text`, content: text, fg: '#8b949e', width: '100%', height: 1 }))
+    timelineCards.add(empty)
+    cards.push(empty)
+  }
+
+  // Both lists draw the same card, so the timeline and the notifications tab build it here.
+  const addTweetCard = (id: string, tweet: AppTweet, selected: boolean): void => {
+    const card = cardBox(renderer, `tweet-card-${id}`, selected)
+    const avatar = new BoxRenderable(renderer, {
+      id: `tweet-card-${id}-avatar`,
+      width: avatarCols,
+      height: avatarRows
+    })
+    const column = new BoxRenderable(renderer, {
+      id: `tweet-card-${id}-column`,
+      flexGrow: 1,
+      height: '100%',
+      flexDirection: 'column'
+    })
+    const mediaPill = tweet.media.length > 0 ? `  ${tweet.media.map((item) => item.type === 'photo' ? 'image' : item.type).join(' · ')}` : ''
+    column.add(authorRow(renderer, {
+      id: `tweet-card-${id}-author`,
+      author: `${articlePill(tweet)}${repostPill(tweet)}${tweet.author.name}${tweet.author.verified ? ' ✔' : ''}  @${tweet.author.handle}${mediaPill}`,
+      posted: relativeTime(tweet.createdAt, now()),
+      fg: selected ? '#58a6ff' : '#f0f6fc'
+    }))
+    column.add(new TextRenderable(renderer, {
+      id: `tweet-card-${id}-body`,
+      content: decodeEntities(tweet.text).replaceAll('\n', ' '),
+      fg: '#c9d1d9',
+      width: '100%',
+      height: 2,
+      wrapMode: 'word'
+    }))
+    column.add(new TextRenderable(renderer, {
+      id: `tweet-card-${id}-metrics`,
+      content: cardMetrics(tweet),
+      fg: '#7d8590',
+      width: '100%',
+      height: 1
+    }))
+    card.add(avatar)
+    card.add(column)
+    timelineCards.add(card)
+    cards.push(card)
+    if (tweet.author.avatarUrl) {
+      slots.push({ key: `avatar:${id}`, url: tweet.author.avatarUrl, box: avatar, pane: timelineCards, width: 1, height: 1, minCols: avatarCols, minRows: avatarRows })
+    }
+  }
+
+  // A notice says what happened; the tweet under it says what it happened to. A notice X sent
+  // about nothing this app can open, such as a post alert, keeps the second line empty.
+  const addNoticeCard = (row: NotificationRow, tweet: AppTweet | undefined, selected: boolean): void => {
+    const notice = row.notice
+    if (!notice) {
+      return
+    }
+    const id = `notice-card-${row.key}`
+    const card = cardBox(renderer, id, selected)
+    const avatar = new BoxRenderable(renderer, { id: `${id}-avatar`, width: avatarCols, height: avatarRows })
+    const column = new BoxRenderable(renderer, { id: `${id}-column`, flexGrow: 1, height: '100%', flexDirection: 'column' })
+    // X writes a whole sentence, so it takes the two rows a tweet gives its text, and the tweet
+    // takes the one row a name and a handle give theirs. The stamp keeps the top right corner it
+    // has on a tweet card, and the sentence wraps in what is left.
+    const stamp = relativeTime(notice.createdAt, now())
+    const head = new BoxRenderable(renderer, { id: `${id}-head`, width: '100%', height: 2, flexShrink: 0, flexDirection: 'row', gap: 1 })
+    head.add(new TextRenderable(renderer, {
+      id: `${id}-text`,
+      content: `${noticeGlyph(notice.icon)} ${decodeEntities(notice.text).replaceAll('\n', ' ')}`,
+      fg: selected ? '#58a6ff' : '#f0f6fc',
+      flexGrow: 1,
+      flexShrink: 1,
+      minWidth: 0,
+      height: 2,
+      wrapMode: 'word'
+    }))
+    if (stamp !== '') {
+      head.add(new TextRenderable(renderer, { id: `${id}-posted`, content: stamp, fg: '#7d8590', flexShrink: 0, width: stamp.length, height: 1 }))
+    }
+    column.add(head)
+    column.add(new TextRenderable(renderer, {
+      id: `${id}-body`,
+      content: tweet ? decodeEntities(tweet.text).replaceAll('\n', ' ') : '',
+      fg: '#8b949e',
+      width: '100%',
+      height: 1,
+      truncate: true
+    }))
+    column.add(new TextRenderable(renderer, {
+      id: `${id}-metrics`,
+      content: tweet ? cardMetrics(tweet) : '',
+      fg: '#7d8590',
+      width: '100%',
+      height: 1
+    }))
+    card.add(avatar)
+    card.add(column)
+    if (row.tweetId !== undefined) {
+      card.onMouseDown = () => { opts.onOpenTweet?.(row.tweetId ?? '') }
+    }
+    timelineCards.add(card)
+    cards.push(card)
+    if (notice.avatarUrl) {
+      slots.push({ key: `avatar:notice:${row.key}`, url: notice.avatarUrl, box: avatar, pane: timelineCards, width: 1, height: 1, minCols: avatarCols, minRows: avatarRows })
+    }
+  }
+
+  const renderNotificationCards = (state: AppState): void => {
+    const { rows, loading } = state.notifications
+    const capacity = cardCapacity(timelineCards.height)
+    scrollTop = scrollWindow(rows.length, rows.findIndex((row) => row.key === state.selectedRowKey), capacity, scrollTop)
+    const visible = rows.slice(scrollTop, scrollTop + capacity)
+    if (visible.length === 0) {
+      emptyCard('timeline-empty', loading ? 'Loading notifications…' : 'No notifications yet.')
+      return
+    }
+    for (const row of visible) {
+      const tweet = row.tweetId !== undefined ? state.tweets[row.tweetId] : undefined
+      const selected = row.key === state.selectedRowKey
+      if (row.notice) {
+        addNoticeCard(row, tweet, selected)
+        continue
+      }
+      if (tweet) {
+        addTweetCard(tweet.id, tweet, selected)
+      }
+    }
+  }
+
   const renderCards = (state: AppState): void => {
     clearCards()
     slots = []
-    const timeline = state.timelines[state.activeFeed]
+    const timeline = activeTimeline(state)
+    if (!timeline) {
+      renderNotificationCards(state)
+      return
+    }
     const capacity = cardCapacity(timelineCards.height)
     scrollTop = scrollWindow(timeline.tweetIds.length, timeline.tweetIds.indexOf(state.selectedTweetId ?? ''), capacity, scrollTop)
     const visibleIds = timeline.tweetIds.slice(scrollTop, scrollTop + capacity)
     if (visibleIds.length === 0) {
-      const empty = cardBox(renderer, 'timeline-empty', false)
-      empty.add(new TextRenderable(renderer, {
-        id: 'timeline-empty-text',
-        content: timeline.loading ? 'Loading feed…' : 'No tweets loaded yet.',
-        fg: '#8b949e',
-        width: '100%',
-        height: 1
-      }))
-      timelineCards.add(empty)
-      cards.push(empty)
+      emptyCard('timeline-empty', timeline.loading ? 'Loading feed…' : 'No tweets loaded yet.')
       return
     }
     for (const id of visibleIds) {
       const tweet = state.tweets[id]
-      if (!tweet) {
-        continue
-      }
-      const selected = id === state.selectedTweetId
-      const card = cardBox(renderer, `tweet-card-${id}`, selected)
-      const avatar = new BoxRenderable(renderer, {
-        id: `tweet-card-${id}-avatar`,
-        width: avatarCols,
-        height: avatarRows
-      })
-      const column = new BoxRenderable(renderer, {
-        id: `tweet-card-${id}-column`,
-        flexGrow: 1,
-        height: '100%',
-        flexDirection: 'column'
-      })
-      const mediaPill = tweet.media.length > 0 ? `  ${tweet.media.map((item) => item.type === 'photo' ? 'image' : item.type).join(' · ')}` : ''
-      column.add(authorRow(renderer, {
-        id: `tweet-card-${id}-author`,
-        author: `${articlePill(tweet)}${repostPill(tweet)}${tweet.author.name}${tweet.author.verified ? ' ✔' : ''}  @${tweet.author.handle}${mediaPill}`,
-        posted: relativeTime(tweet.createdAt, now()),
-        fg: selected ? '#58a6ff' : '#f0f6fc'
-      }))
-      column.add(new TextRenderable(renderer, {
-        id: `tweet-card-${id}-body`,
-        content: decodeEntities(tweet.text).replaceAll('\n', ' '),
-        fg: '#c9d1d9',
-        width: '100%',
-        height: 2,
-        wrapMode: 'word'
-      }))
-      column.add(new TextRenderable(renderer, {
-        id: `tweet-card-${id}-metrics`,
-        content: cardMetrics(tweet),
-        fg: '#7d8590',
-        width: '100%',
-        height: 1
-      }))
-      card.add(avatar)
-      card.add(column)
-      timelineCards.add(card)
-      cards.push(card)
-      if (tweet.author.avatarUrl) {
-        slots.push({ key: `avatar:${id}`, url: tweet.author.avatarUrl, box: avatar, pane: timelineCards, width: 1, height: 1, minCols: avatarCols, minRows: avatarRows })
+      if (tweet) {
+        addTweetCard(id, tweet, id === state.selectedTweetId)
       }
     }
   }
@@ -1317,7 +1402,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   return {
     render(state: AppState, auth?: AuthStatus) {
       const focused = focusedTweet(state)
-      const timeline = state.timelines[state.activeFeed]
+      const timeline = activeTimeline(state)
       body.visible = state.lightbox === undefined
       lightbox.visible = state.lightbox !== undefined
       if (state.helpOpen) {
@@ -1331,10 +1416,12 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
         : undefined
       // X retired the v1.1 account endpoints, so a cookie session cannot resolve its own handle.
       const handle = auth?.ok && auth.username ? `@${auth.username}` : 'cookie session'
-      headerMeta.content = `${auth?.ok ? handle : 'auth pending'} · ${feedName(state.activeFeed)}`
-      railFeeds.content = `${state.activeFeed === 'following' ? '●' : '○'} Following\n${state.activeFeed === 'forYou' ? '●' : '○'} For You\n\nTab switches\ns sorts`
+      headerMeta.content = headerLine(auth?.ok ? handle : 'auth pending', state)
+      railFeeds.content = railTabs(state)
       railProfile.content = auth?.ok ? `Signed in\n${handle}\n\n${auth.name ?? ''}` : 'Checking credentials…'
-      timelineHeader.content = timelineTitle(state.activeFeed, state.feedSort, timeline.tweetIds.length)
+      timelineHeader.content = timeline
+        ? timelineTitle(timeline.id, state.feedSort, timeline.tweetIds.length)
+        : notificationsTitle(state.notifications)
       // A new tweet always starts at its first line, never at the old offset.
       if (focused?.id !== detailTweetId) {
         detailTweetId = focused?.id
@@ -1583,15 +1670,56 @@ export const bookmarkCount = (tweet: AppTweet): string =>
 const cardMetrics = (tweet: AppTweet): string =>
   `${tweet.metrics.replies ?? 0} replies   ${tweet.metrics.reposts ?? 0} reposts   ${likeCount(tweet)}${tweet.bookmarked === true ? '   ⚑' : ''}`
 
-export const feedName = (feed: FeedId): string => (feed === 'following' ? 'Following' : 'For You')
+export const feedName = (tab: TabId): string => {
+  if (tab === 'following') {
+    return 'Following'
+  }
+  return tab === 'forYou' ? 'For You' : 'Notifications'
+}
 
 export const sortName = (sort: FeedSort): string => (sort === 'popular' ? 'Popular' : 'Recent')
 
 // Only Following can be sorted, so naming a sort on For You would promise a control the
 // key does not give there.
-export const timelineTitle = (feed: FeedId, sort: FeedSort, count: number): string => {
-  const sortLabel = feed === 'following' ? `${sortName(sort)} · ` : ''
-  return `${feedName(feed)} · ${sortLabel}${count} tweets`
+export const timelineTitle = (tab: TabId, sort: FeedSort, count: number): string => {
+  const sortLabel = tab === 'following' ? `${sortName(sort)} · ` : ''
+  return `${feedName(tab)} · ${sortLabel}${count} tweets`
+}
+
+// A row is a mention or an aggregated line, so "tweets" would be the wrong word. The unread
+// count comes from x.com and only x.com clears it, so it is named as what x.com still holds.
+export const notificationsTitle = (notifications: NotificationsState): string => {
+  const unread = notifications.unread > 0 ? ` · ${notifications.unread} unread` : ''
+  return `Notifications · ${notifications.rows.length} rows${unread}`
+}
+
+// The dot marks the open tab. The rail is sixteen columns wide inside its border, which
+// "○ Notifications" fills exactly, so the unread count goes on the header row instead.
+export const railTabs = (state: AppState): string => {
+  const mark = (tab: TabId): string => (state.activeTab === tab ? '●' : '○')
+  return `${mark('following')} Following\n${mark('forYou')} For You\n${mark('notifications')} Notifications\n\nTab switches\ns sorts`
+}
+
+// The count x.com still holds, on every tab, so the reader sees there is something new
+// without switching to look.
+export const headerLine = (who: string, state: AppState): string => {
+  const unread = state.notifications.unread > 0 ? ` · ${state.notifications.unread} unread` : ''
+  return `${who} · ${feedName(state.activeTab)}${unread}`
+}
+
+// x.com draws a heart, a repost arrow or a bell beside each line. One glyph carries the same
+// thing here, because the sentence beside it never names the kind of event.
+export const noticeGlyph = (icon: NoticeIcon): string => {
+  if (icon === 'like') {
+    return '♥'
+  }
+  if (icon === 'repost') {
+    return '↻'
+  }
+  if (icon === 'follow') {
+    return '⊕'
+  }
+  return icon === 'bell' ? '◆' : '•'
 }
 
 export const repliesTitle = (total: number, index: number): string => {

@@ -4,7 +4,7 @@ import { TwitterClient } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, deleteFromDraft, enterSelection, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeTimelinePage, moveComposerCaret, needsOlderTweets, needsReplies, openComposer, previewOf, previewsOf, selectFirstReply, selectRelativeDetail, scrollHelp, selectRelativeTweet, setFeedSort, toggleHelp, toggleLightbox, videoOf, type AppState, type FeedId, type TimelineState } from '../state/store.ts'
+import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, deleteFromDraft, enterSelection, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, openComposer, previewOf, previewsOf, selectFirstReply, selectRelativeDetail, selectRelativeRow, scrollHelp, selectRelativeTweet, setFeedSort, toggleHelp, toggleLightbox, videoOf, type AppState, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
 import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
@@ -48,6 +48,24 @@ export const feedLoadResult = (mode: FeedLoad, added: number): string => {
     return added > 0 ? `${added} older tweets` : 'no older tweets'
   }
   return `loaded ${added} tweets`
+}
+
+export const notificationLoadResult = (mode: FeedLoad, added: number): string => {
+  if (mode === 'newer') {
+    return added > 0 ? `${added} new notifications` : 'no new notifications'
+  }
+  if (mode === 'older') {
+    return added > 0 ? `${added} older notifications` : 'no older notifications'
+  }
+  return `loaded ${added} notifications`
+}
+
+// Tab walks the three tabs in the order the rail lists them, and wraps at the end.
+export const nextTab = (tab: TabId): TabId => {
+  if (tab === 'following') {
+    return 'forYou'
+  }
+  return tab === 'forYou' ? 'notifications' : 'following'
 }
 
 export type TerminalAppOptions = {
@@ -140,10 +158,15 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     let olderTimer: ReturnType<typeof setTimeout> | undefined
     const scheduleOlderTweets = (): void => {
       clearTimeout(olderTimer)
-      if (!needsOlderTweets(state)) {
+      const wanted = needsOlderTweets(state) || needsOlderNotifications(state)
+      if (!wanted) {
         return
       }
       olderTimer = setTimeout(() => {
+        if (needsOlderNotifications(state)) {
+          void loadOlderNotifications()
+          return
+        }
         if (needsOlderTweets(state)) {
           void loadOlder()
         }
@@ -160,7 +183,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
 
     const loadFeed = async (feed: FeedId, mode: FeedLoad): Promise<void> => {
       const before = state.timelines[feed].tweetIds.length
-      state = { ...state, activeFeed: feed, timelines: { ...state.timelines, [feed]: { ...state.timelines[feed], loading: true, error: undefined } }, status: feedLoadStatus(mode) }
+      state = { ...state, activeTab: feed, timelines: { ...state.timelines, [feed]: { ...state.timelines[feed], loading: true, error: undefined } }, status: feedLoadStatus(mode) }
       rerender()
       try {
         const page = await client.loadHomeTimelinePage({
@@ -184,14 +207,57 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       rerender()
     }
 
+    // The notifications tab is the old REST API, so it gets its own loader. The cursors, the
+    // three modes and the automatic page down all behave the way the feeds do.
+    const loadNotifications = async (mode: FeedLoad): Promise<void> => {
+      const before = state.notifications.rows.length
+      const cursor = mode === 'newer' ? state.notifications.topCursor : mode === 'older' ? state.notifications.bottomCursor : undefined
+      state = { ...state, activeTab: 'notifications', notifications: { ...state.notifications, loading: true, error: undefined }, status: 'loading notifications' }
+      rerender()
+      try {
+        const page = await client.loadNotificationsPage({ count: 40, cursor })
+        state = mergeNotificationsPage(state, page, mode === 'newer' ? 'top' : 'bottom')
+        const added = state.notifications.rows.length - before
+        const top = state.notifications.rows[0]
+        if (mode === 'newer' && added > 0 && top !== undefined) {
+          state = { ...state, selectedRowKey: top.key, detailStack: [], selectedDetailId: undefined, textFocused: false }
+        }
+        state = { ...state, status: notificationLoadResult(mode, added) }
+      } catch (error) {
+        state = { ...state, status: 'notifications error', notifications: { ...state.notifications, loading: false, error: errorMessage(error) } }
+      }
+      rerender()
+      await refreshBadge()
+    }
+
+    // The badge is a second request, so a failure only means the count stays as it was.
+    const refreshBadge = async (): Promise<void> => {
+      try {
+        const counts = await client.loadBadgeCounts()
+        state = { ...state, notifications: { ...state.notifications, unread: counts.notifications } }
+        rerender()
+      } catch (error) {
+        await debugLogger.log('ui.badgeCount.failed', { error: errorMessage(error) })
+      }
+    }
+
     // One page down at a time, or a fast j would queue a fetch per keystroke.
     let loadingOlder = false
     const loadOlder = async (): Promise<void> => {
+      if (loadingOlder || state.activeTab === 'notifications') {
+        return
+      }
+      loadingOlder = true
+      await loadFeed(state.activeTab, 'older')
+      loadingOlder = false
+    }
+
+    const loadOlderNotifications = async (): Promise<void> => {
       if (loadingOlder) {
         return
       }
       loadingOlder = true
-      await loadFeed(state.activeFeed, 'older')
+      await loadNotifications('older')
       loadingOlder = false
     }
 
@@ -454,32 +520,42 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         rerender()
         return
       }
+      // The notifications tab walks rows, not tweets, so j/k move its own cursor there.
       if (key.name === 'j' || key.name === 'down') {
-        state = selectRelativeTweet(state, 1)
+        state = state.activeTab === 'notifications' ? selectRelativeRow(state, 1) : selectRelativeTweet(state, 1)
         rerender()
         return
       }
       if (key.name === 'k' || key.name === 'up') {
-        state = selectRelativeTweet(state, -1)
+        state = state.activeTab === 'notifications' ? selectRelativeRow(state, -1) : selectRelativeTweet(state, -1)
         rerender()
         return
       }
       if (key.name === 'tab') {
-        const next = state.activeFeed === 'following' ? 'forYou' : 'following'
-        // A feed the reader already opened keeps its tweets and its place, so Tab only
-        // fetches the first page of a feed that holds nothing yet.
+        const next = nextTab(state.activeTab)
+        // A tab the reader already opened keeps what it holds and keeps its place, so Tab
+        // only fetches the first page of a tab that holds nothing yet.
+        if (next === 'notifications') {
+          if (state.notifications.rows.length > 0) {
+            state = { ...state, activeTab: next, detailStack: [], selectedDetailId: undefined, textFocused: false, status: 'switched to notifications' }
+            rerender()
+            return
+          }
+          void loadNotifications('initial')
+          return
+        }
         if (state.timelines[next].tweetIds.length > 0) {
-          state = { ...state, activeFeed: next, selectedTweetId: state.timelines[next].tweetIds[0], detailStack: [], selectedDetailId: undefined, textFocused: false, status: 'switched feed' }
+          state = { ...state, activeTab: next, selectedTweetId: state.timelines[next].tweetIds[0], detailStack: [], selectedDetailId: undefined, textFocused: false, status: 'switched feed' }
           rerender()
           return
         }
         void loadFeed(next, 'initial')
         return
       }
-      // Only the Following feed carries a sort. On For You the key would silently do
+      // Only the Following feed carries a sort. On the other tabs the key would silently do
       // nothing, so say so instead.
       if (key.name === 's') {
-        if (state.activeFeed !== 'following') {
+        if (state.activeTab !== 'following') {
           state = { ...state, status: 'sort applies to the Following feed only' }
           rerender()
           return
@@ -490,7 +566,11 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
       // Shift+R arrives as name 'r' with shift set, so refresh must win over the reply composer.
       if (key.name === 'R' || (key.shift && key.name === 'r')) {
-        void loadFeed(state.activeFeed, 'newer')
+        if (state.activeTab === 'notifications') {
+          void loadNotifications('newer')
+          return
+        }
+        void loadFeed(state.activeTab, 'newer')
         return
       }
       // Shift+L already opens the selection, so plain l alone is the like.

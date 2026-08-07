@@ -57,7 +57,7 @@ The card lays itself out for the window it opens in. It sits in the middle of th
 
 - `?` — open or close the key popup
 - `j` / `k` — move the feed selection, whatever the arrows are pointed at
-- `Tab` — switch between Following and For You
+- `Tab` — walk the three tabs: Following, For You, Notifications
 - `s` — sort Following by Popular or Recent
 - `R` — refresh the feed; new tweets come in at the top
 - `→` — point the arrows at the open tweet's text when it does not fit the pane, then at the replies, on the first one
@@ -134,6 +134,18 @@ An article body arrives as a Draft.js document, not as a run of text, and the im
 A picture takes at most half the body, and never more than 10 rows, because the window only draws a picture that fits in the rows it has left. A taller one would sit out every scroll position but its own and leave a blank foot in its place. Click a picture, or press `p`, to open it full screen; `p` picks the topmost picture on the screen, so scroll to the one you want first. The caption row under the body counts them and names the key: `3 images in the article  ·  click one, or p enlarges the one on screen`.
 
 A video renders as its poster frame, because a terminal cannot play the mp4. The caption under it states the size, the length and the key: `video 1920×1080 · 22:02 · v plays it`. Press `v` to hand the highest-bitrate mp4 to your system player.
+
+## Notifications
+
+`Tab` reaches a third tab after Following and For You. It holds what x.com puts on its bell: the mentions and replies addressed to you, and the likes, reposts and follows other people gave you.
+
+Notifications are the one read X never moved to GraphQL. They come from `/i/api/2/notifications/all.json`, which is the pre-2021 REST API, and they answer in that shape: a flat `globalObjects` map of users, tweets and notices, plus a `timeline` of entries that carry nothing but ids. The tweets in it are the old shape too, with `full_text` instead of a note tweet and a `user_id_str` instead of a nested user result, so `mapLegacyTweet` maps them onto the same `AppTweet` the feeds use and the cards, the detail pane and every shortcut then treat them as ordinary tweets. That path also needs no `x-client-transaction-id`: every probe answered 200 without one.
+
+A row is one of two things. A mention or a reply arrives as the tweet itself and draws the same bordered card as the feed. Everything else arrives as a line X wrote, names and all, such as `Ann and 2 others liked your post`, and the app shows the sentence as it stands rather than rebuilding it from the parts. A `♥`, `↻`, `⊕` or `◆` in front of it says which kind it is, since the sentence never states that, and the first person named in it lends the avatar. Under the sentence sits the post it is about. One live page came back as 15 notices and 53 tweets over 18 users, and the icons on it were 13 hearts, one repost and one bell.
+
+The row under the cursor names the tweet it is about, so `l`, `b`, `r`, `t`, `o`, `p`, `v` and the detail pane all act on that tweet with no second path through the code. A notice about something this app cannot open, such as a post alert or a new follower, leaves those keys with nothing to act on. Paging works as it does on the feeds: the same two cursors, `R` for what arrived since, and the next page down fetched on its own once the selection comes within five rows of the end.
+
+The header carries the unread count x.com draws on its own tab, from `badge_count.json`, on every tab rather than only on this one. The app only reads that count. Clearing it is a write, and x.com clears it when you read the tab there, so the number here goes down when x.com says it does and not when you scroll past a row.
 
 ## Replying and liking
 
@@ -220,8 +232,10 @@ Implemented:
 - `b` to bookmark or unbookmark the open tweet, drawn as a `⚑` on the card, applied the same way
 - `?` floats a centred key popup over the panes, in three columns that collapse to two and then one on a narrow terminal, and scroll when the window is too short
 - `R` refreshes from the top cursor and prepends what is new, while the older pages page in from the bottom cursor on their own as the selection nears the end
+- a Notifications tab on `Tab`, off the old REST `notifications/all.json`: mentions as ordinary tweet cards, everything else as X's own aggregated line with a `♥`/`↻`/`⊕`/`◆` glyph and an avatar, every tweet shortcut acting on the row under the cursor
+- the unread badge from `badge_count.json` in the header, read only, so x.com stays the one thing that clears it
 - automatic retry with backoff on X's transient write refusal (error 344) and on its automation gate (error 226, up to 5 retries over 230s), for replies, likes and bookmarks
-- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, the key popup and its reflow, the cookie write path and its refusal codes, OAuth flow, media helpers
+- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, notifications, the key popup and its reflow, the cookie write path and its refusal codes, OAuth flow, media helpers
 
 Live X GraphQL endpoints can still break when operation IDs or response shapes change; query ID refresh and tests are set up to make those failures visible. Replies additionally depend on X's automation heuristic, which X can tighten at any time.
 

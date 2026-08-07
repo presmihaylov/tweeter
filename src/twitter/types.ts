@@ -53,6 +53,38 @@ export type TweetBundle = {
   related: AppTweet[]
 }
 
+// What the icon beside a notification says happened. X names a few dozen icons; these are
+// the ones the TUI draws, and anything else falls back to a plain dot.
+export type NoticeIcon = 'like' | 'repost' | 'follow' | 'bell' | 'other'
+
+// One aggregated line off the notifications tab, such as "Ann and 2 others liked your post".
+// X writes the whole sentence, names and all, so the TUI shows it as it stands.
+export type AppNotice = {
+  icon: NoticeIcon
+  text: string
+  avatarUrl?: string
+  createdAt?: string
+}
+
+// A row on the notifications tab is either a tweet card, when somebody mentioned or answered
+// this account, or a notice line. A notice that names a tweet carries its id, so the detail
+// pane and the like, bookmark and reply keys all keep working on the row under the cursor.
+export type NotificationRow = {
+  key: string
+  tweetId?: string
+  notice?: AppNotice
+}
+
+export type NotificationPage = {
+  rows: NotificationRow[]
+  tweets: AppTweet[]
+  topCursor?: string
+  bottomCursor?: string
+}
+
+// The unread badges x.com draws on its own tabs.
+export type BadgeCounts = { notifications: number; messages: number }
+
 export type ConversationPage = {
   tweetId: string
   replies: AppTweet[]

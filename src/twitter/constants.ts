@@ -18,6 +18,31 @@ export const fallbackQueryIds: Readonly<Record<string, string>> = {
 
 export const tweetTextLimit = 280
 
+// The notifications tab is the old REST API, and it answers a bare request with a thinner
+// page: no extended text, no media sizes, no reply counts. These are the toggles x.com itself
+// sends, minus the ones for parts this app does not draw.
+export const notificationParams: Readonly<Record<string, string>> = {
+  include_profile_interstitial_type: '1',
+  include_blocking: '1',
+  include_followed_by: '1',
+  include_can_dm: '1',
+  skip_status: '1',
+  cards_platform: 'Web-12',
+  include_cards: '1',
+  include_ext_alt_text: 'true',
+  include_quote_count: 'true',
+  include_reply_count: '1',
+  tweet_mode: 'extended',
+  include_entities: 'true',
+  include_user_entities: 'true',
+  include_ext_media_color: 'true',
+  include_ext_media_availability: 'true',
+  send_error_codes: 'true',
+  simple_quoted_tweet: 'true',
+  ext: 'mediaStats,highlightedLabel',
+  include_ext_edit_control: 'true'
+}
+
 // X answers a second like on the same tweet with this code. The like the caller asked for
 // is already on the tweet, so the call did its job and the code is not a failure. A second
 // bookmark answers with the same code, and with the same "already favorited" wording.
