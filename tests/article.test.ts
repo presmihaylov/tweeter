@@ -94,9 +94,9 @@ describe('the body the feed leaves out', () => {
     expect(mergeFocalTweet(state, appTweet('1', true)).tweets['1']?.repostedBy).toEqual({ handle: 'u2', name: 'U2' })
   })
 
-  test('a copy that carries no more text leaves the feed copy alone', () => {
+  test('a copy that carries no more text keeps the body already read', () => {
     const state = mergeTimelinePage(initialAppState(), 'following', [appTweet('1', true)], {})
-    expect(mergeFocalTweet(state, feedCopy('1'))).toBe(state)
+    expect(mergeFocalTweet(state, feedCopy('1')).tweets['1']?.text).toContain('body line 59')
   })
 })
 

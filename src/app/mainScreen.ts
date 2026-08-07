@@ -1,5 +1,5 @@
-import { BoxRenderable, TextRenderable, type CliRenderer, type Renderable } from '@opentui/core'
-import { focusedTweet, parentIdOf, previewOf, replyIdsOf, type AppState, type ConversationState, type FeedId, type FeedSort } from '../state/store.ts'
+import { BoxRenderable, CliRenderEvents, TextRenderable, type CliRenderer, type Renderable } from '@opentui/core'
+import { focusedTweet, parentIdOf, previewOf, previewsOf, replyIdsOf, type AppState, type ConversationState, type FeedId, type FeedSort } from '../state/store.ts'
 import type { AppMedia, AppTweet, AuthStatus, WriteRetryNotice } from '../twitter/types.ts'
 import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
@@ -18,7 +18,7 @@ export type MainScreen = {
 }
 
 export type MainScreenOptions = {
-  onOpenPhoto?: (source: 'tweet' | 'quote') => void
+  onOpenPhoto?: (source: 'tweet' | 'quote', index?: number) => void
   onCloseLightbox?: () => void
   onOpenQuote?: () => void
   onOpenTweet?: (tweetId: string) => void
@@ -302,6 +302,10 @@ type ImageSlot = {
   minRows?: number
 }
 
+// One tile per picture on the tweet. The row is rebuilt on every frame, the way the cards
+// are, because the open tweet changes how many pictures the row holds.
+type TileRow = { tiles: BoxRenderable[]; slots: ImageSlot[] }
+
 export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions = {}): MainScreen => {
   const shell = new BoxRenderable(renderer, {
     id: 'main-shell',
@@ -344,9 +348,9 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   })
   const headerKeys = new TextRenderable(renderer, {
     id: 'main-header-keys',
-    content: 'R refresh Tab feed s sort j/k feed ←/→ focus ↑/↓ move Shift+→ open Enter more l like p photo v video o open q quit',
+    content: 'R refresh Tab feed s sort j/k feed ←/→ focus ↑/↓ move Shift+→ open Enter more l like r reply t quote p photo v video o open q quit',
     fg: '#58a6ff',
-    width: 114,
+    width: 130,
     height: 1,
     // Two more hints made the row wider than a 173-column window, which pushed the right
     // border off the screen. Shrinking beats overflowing.
@@ -563,12 +567,14 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     height: 1,
     truncate: true
   })
+  // A tweet carries up to four pictures, so the row holds one tile for each of them.
   const mediaBox = new BoxRenderable(renderer, {
     id: 'detail-media-image',
     width: '100%',
     height: 0,
     flexShrink: 0,
-    flexDirection: 'column'
+    flexDirection: 'row',
+    gap: 1
   })
   // The quoted tweet is its own bordered card, the way x.com nests it inside the post.
   const quoteBox = new BoxRenderable(renderer, {
@@ -622,7 +628,9 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     id: 'detail-quote-image',
     width: '100%',
     flexGrow: 1,
-    minHeight: 0
+    minHeight: 0,
+    flexDirection: 'row',
+    gap: 1
   })
   quoteColumn.add(quoteAuthor)
   quoteColumn.add(quoteText)
@@ -766,15 +774,28 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   shell.add(status)
   renderer.root.add(shell)
 
+  // The terminal draws its own cursor, so the drawer only says which cell it belongs in.
+  // The drawer is measured after it is painted, so the cell follows the painted frame; a
+  // cursor placed from the render pass would sit a row behind after every wrap.
+  let caret: { row: number; col: number } | undefined
+  const paintCaret = (): void => {
+    if (!caret) {
+      renderer.setCursorPosition(0, 0, false)
+      return
+    }
+    renderer.setCursorPosition(composerText.x + caret.col + 1, composerText.y + caret.row + 1, true)
+  }
+  renderer.on(CliRenderEvents.FRAME, paintCaret)
+
   let cards: BoxRenderable[] = []
   let slots: ImageSlot[] = []
   let replyCards: Renderable[] = []
   let replySlots: ImageSlot[] = []
   let replyTop = 0
-  let mediaSlot: ImageSlot | undefined
+  let mediaTiles: TileRow = { tiles: [], slots: [] }
+  let quoteTiles: TileRow = { tiles: [], slots: [] }
   let parentAvatarSlot: ImageSlot | undefined
   let quoteAvatarSlot: ImageSlot | undefined
-  let quoteMediaSlot: ImageSlot | undefined
   let detailAvatarSlot: ImageSlot | undefined
   let lightboxSlot: ImageSlot | undefined
   let articleSlots: ImageSlot[] = []
@@ -843,6 +864,35 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     if (block.below !== undefined) {
       textPart([block.below], marker)
     }
+  }
+
+  // The tiles share the row, so four pictures each take a quarter of it. A click on one
+  // names its own index, or the second picture would enlarge the first.
+  const renderTiles = (
+    row: TileRow,
+    args: { box: BoxRenderable; pane: BoxRenderable; id: string; source: 'tweet' | 'quote'; tweet: AppTweet | undefined; visible: boolean }
+  ): TileRow => {
+    for (const tile of row.tiles) {
+      args.box.remove(tile.id)
+      tile.destroyRecursively()
+    }
+    const next: TileRow = { tiles: [], slots: [] }
+    const tweet = args.tweet
+    if (!tweet || !args.visible) {
+      return next
+    }
+    previewsOf(tweet).forEach((media, index) => {
+      const tile = new BoxRenderable(renderer, { id: `${args.id}-${index}`, flexGrow: 1, flexBasis: 0, minWidth: 0, height: '100%' })
+      // A click bubbles to the card behind it, which would open the quote as well.
+      tile.onMouseDown = (event) => {
+        event.stopPropagation()
+        opts.onOpenPhoto?.(args.source, index)
+      }
+      args.box.add(tile)
+      next.tiles.push(tile)
+      next.slots.push({ key: `media:${tweet.id}:${index}`, url: media.url, box: tile, pane: args.pane, width: media.width, height: media.height, minRows: mediaFloor })
+    })
+    return next
   }
 
   const clearReplyCards = (): void => {
@@ -1052,9 +1102,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       // An empty image box would still claim its share of the pane, so hide it.
       mediaBox.visible = layout.media > 0
       mediaBox.height = layout.media
-      mediaSlot = photo && focused && layout.media > 0
-        ? { key: `media:${focused.id}`, url: photo.url, box: mediaBox, pane: detailPane, width: photo.width, height: photo.height, minRows: mediaFloor }
-        : undefined
+      mediaTiles = renderTiles(mediaTiles, { box: mediaBox, pane: detailPane, id: 'detail-media-tile', source: 'tweet', tweet: focused, visible: layout.media > 0 })
       quoteBox.visible = quoted !== undefined
       quoteBox.height = layout.quote
       const quoteMediaRows = layout.quote - quoteRows
@@ -1064,9 +1112,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       quoteAvatarSlot = quoted?.author.avatarUrl
         ? { key: `avatar:${quoted.id}`, url: quoted.author.avatarUrl, box: quoteAvatar, pane: quoteBox, width: 1, height: 1, minCols: avatarCols, minRows: avatarRows }
         : undefined
-      quoteMediaSlot = quotePhoto && quoted && quoteMediaRows > 0
-        ? { key: `media:${quoted.id}`, url: quotePhoto.url, box: quoteMediaBox, pane: quoteBox, width: quotePhoto.width, height: quotePhoto.height, minRows: mediaFloor }
-        : undefined
+      quoteTiles = renderTiles(quoteTiles, { box: quoteMediaBox, pane: quoteBox, id: 'detail-quote-tile', source: 'quote', tweet: quoted, visible: quoteMediaRows > 0 })
       repliesHeader.content = repliesTitle(replyIdsOf(state).length, state.selectedDetailId ? replyIdsOf(state).indexOf(state.selectedDetailId) : -1)
       renderReplyCards(state, layout.replies)
       composer.visible = state.composer.open
@@ -1074,9 +1120,10 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       // The drawer is measured only after it is drawn, so the shell gives the width until then:
       // its own pad, then the border and the pad of the drawer.
       const composerWidth = composerText.width > 0 ? composerText.width : renderer.terminalWidth - 6
-      const drawer = composerBody(state.composer.draft, state.composer.error, composerWidth)
+      const drawer = composerBody(state.composer.draft, state.composer.error, composerWidth, state.composer.caret)
       composer.height = drawer.height
       composerText.content = drawer.text
+      caret = state.composer.open ? { row: drawer.caretRow, col: drawer.caretCol } : undefined
       statusText.content = state.status
       statusText.fg = state.status.includes('error') || state.status.includes('failed') ? '#ff7b72' : '#7d8590'
       renderCards(state)
@@ -1090,7 +1137,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
         return [toPlacement(lightboxSlot, 'rect', cell, renderer)].filter((placement): placement is ImagePlacement => placement !== undefined)
       }
       const circles = [...slots, ...replySlots, detailAvatarSlot, parentAvatarSlot, quoteAvatarSlot].filter((slot): slot is ImageSlot => slot !== undefined)
-      const rects = [...articleSlots, mediaSlot, quoteMediaSlot].filter((slot): slot is ImageSlot => slot !== undefined)
+      const rects = [...articleSlots, ...mediaTiles.slots, ...quoteTiles.slots]
       return [
         ...circles.map((slot) => toPlacement(slot, 'circle', cell, renderer)),
         ...rects.map((slot) => toPlacement(slot, 'rect', cell, renderer))
@@ -1109,6 +1156,8 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       return item ? { media: item.media, key: item.key } : undefined
     },
     destroy() {
+      renderer.off(CliRenderEvents.FRAME, paintCaret)
+      renderer.setCursorPosition(0, 0, false)
       clearCards()
       clearReplyCards()
       clearBodyParts()
@@ -1217,18 +1266,19 @@ export const repliesTitle = (total: number, index: number): string => {
   return `Replies · ${position}`
 }
 
-// The handle says who reads the reply, and the count says whether X will take it. A
-// draft over the limit is refused, so the counter turns into the warning.
+// The handle says whose tweet the draft answers or reposts, and the count says whether X
+// will take it. A draft over the limit is refused, so the counter turns into the warning.
 export const composerHeading = (state: AppState): string => {
-  const id = state.composer.replyToTweetId
+  const id = state.composer.targetTweetId
   const target = id ? state.tweets[id] : undefined
   const who = target ? `@${target.author.handle}` : (id ?? 'tweet')
+  const lead = state.composer.mode === 'quote' ? `Quoting ${who}` : `Replying to ${who}`
   const used = state.composer.draft.trim().length
   const count = used > tweetTextLimit ? `${used}/${tweetTextLimit} too long` : `${used}/${tweetTextLimit}`
   if (state.composer.sending) {
-    return `Replying to ${who} · sending…`
+    return `${lead} · sending…`
   }
-  return `Replying to ${who} · ${count} · Enter sends · Esc closes`
+  return `${lead} · ${count} · Enter sends · Esc closes`
 }
 
 // The drawer holds a border, a pad on each side and the heading, so a draft of one row
@@ -1239,53 +1289,79 @@ const composerChrome = 5
 // keeps the rest of the screen.
 export const composerTextCap = 8
 
+// One drawn row of the draft. `start` is where the row begins inside the draft, which is
+// what turns a caret counted in characters into a row and a column on the screen.
+export type ComposerRow = { text: string; start: number }
+
 // wrapText is for a tweet that is already written, so it drops the spacing the author typed.
 // The composer shows a draft as it is typed, so this wrap keeps every space except the one it
 // breaks on.
-export const composerLines = (draft: string, width: number): string[] => {
-  if (width < 1) {
-    return draft.split('\n')
-  }
-  const lines: string[] = []
+export const composerRows = (draft: string, width: number): ComposerRow[] => {
+  const rows: ComposerRow[] = []
+  let offset = 0
   for (const paragraph of draft.split('\n')) {
     let rest = paragraph
-    while (rest.length > width) {
+    let start = offset
+    while (width >= 1 && rest.length > width) {
       const space = rest.lastIndexOf(' ', width)
       // A word wider than the drawer has to be cut, or it would never break and never wrap.
       const cut = space > 0 ? space : width
-      lines.push(rest.slice(0, cut))
-      rest = rest.slice(space > 0 ? cut + 1 : cut)
+      rows.push({ text: rest.slice(0, cut), start })
+      // The space it broke on is drawn nowhere, so the next row starts past it.
+      const step = space > 0 ? cut + 1 : cut
+      rest = rest.slice(step)
+      start += step
     }
-    lines.push(rest)
+    rows.push({ text: rest, start })
+    offset = start + rest.length + 1
   }
-  return lines
+  return rows
+}
+
+export const composerLines = (draft: string, width: number): string[] =>
+  composerRows(draft, width).map((row) => row.text)
+
+// The last row that starts at or before the caret is the row the caret is on. A caret on the
+// space a row broke on belongs to the row it ends, which is where the reader typed it.
+const caretCell = (rows: ComposerRow[], caret: number): { row: number; col: number } => {
+  let index = 0
+  for (let candidate = 0; candidate < rows.length; candidate += 1) {
+    index = (rows[candidate]?.start ?? 0) <= caret ? candidate : index
+  }
+  const row = rows[index]
+  return { row: index, col: Math.min(caret - (row?.start ?? 0), row?.text.length ?? 0) }
 }
 
 // A one-row drawer cut the draft off at the width instead of wrapping it, so the drawer grows
 // with what it holds. Past the cap the head of the draft goes, never the foot: the reader
 // types at the foot, and the error under it says why the reply did not go.
-export const composerBody = (draft: string, error: string | undefined, width: number, cap = composerTextCap): { text: string; height: number } => {
-  const written = composerLines(draft === '' ? 'Start typing…' : draft, width)
+export const composerBody = (draft: string, error: string | undefined, width: number, caret = draft.length, cap = composerTextCap): { text: string; height: number; caretRow: number; caretCol: number } => {
+  const empty = draft === ''
+  const written = composerRows(empty ? 'Start typing…' : draft, width)
+  const cell = caretCell(written, empty ? 0 : caret)
   const full = error === undefined ? [] : ['', ...composerLines(`Error: ${error}`, width)]
   // The whole drawer still owes the cap, so a long reason leaves the draft one row.
   const reason = full.slice(0, Math.max(0, cap - 1))
   const room = cap - reason.length
-  const lines = [...written.slice(Math.max(0, written.length - room)), ...reason]
-  return { text: lines.join('\n'), height: composerChrome + lines.length }
+  // The head of the draft goes first, but never the row the caret is on: the reader has to
+  // see what the next keystroke changes.
+  const first = Math.min(Math.max(0, written.length - room), cell.row)
+  const lines = [...written.slice(first, first + room).map((row) => row.text), ...reason]
+  return { text: lines.join('\n'), height: composerChrome + lines.length, caretRow: cell.row - first, caretCol: cell.col }
 }
 
 // The gate stays shut for minutes, not for one request, so a reader who sends again at once
 // only holds it shut. The advice belongs on the screen, where the refusal is.
 const automationAdvice = 'X refused every retry. The gate opens again after a few quiet minutes, so wait before you send it again.'
 
-// A refused reply has to say why on screen, not only in the log. Code 226 is the automation
+// A refused write has to say why on screen, not only in the log. Code 226 is the automation
 // gate and every other code means something else, so the number goes in front of the reader.
-export const replyFailure = (result: { error: string; code?: number }, logPath: string): { error: string; status: string } => {
+export const writeFailure = (what: string, result: { error: string; code?: number }, logPath: string): { error: string; status: string } => {
   const reason = result.code === undefined ? result.error : `${result.error} (code ${result.code})`
   const advice = result.code === automationWriteCode ? `\n${automationAdvice}` : ''
   return {
     error: `${reason}${advice}\nThe draft is kept. Log: ${logPath}`,
-    status: `reply failed (${result.code ?? 'no code'}); log: ${logPath}`
+    status: `${what} failed (${result.code ?? 'no code'}); log: ${logPath}`
   }
 }
 

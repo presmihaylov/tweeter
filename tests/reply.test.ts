@@ -3,7 +3,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { TwitterClient } from '../src/twitter/client.ts'
-import { composerBody, composerHeading, composerLines, composerTextCap, replyFailure } from '../src/app/mainScreen.ts'
+import { composerBody, composerHeading, composerLines, composerTextCap, writeFailure } from '../src/app/mainScreen.ts'
 import { initialAppState, mergeTimelinePage } from '../src/state/store.ts'
 import { jsonResponse, makeTweetResult, shellHtml, textResponse } from './helpers.ts'
 import { parseTweetsFromInstructions } from '../src/twitter/extract/tweet.ts'
@@ -129,15 +129,18 @@ describe('replying with cookies', () => {
       seen.push(((init?.headers ?? {}) as Record<string, string>)['x-client-transaction-id'] ?? '')
       return jsonResponse(createdBody('999'))
     })
-    expect(await client.replyToTweet({ tweetId: '42', text: 'hi' })).toEqual({ ok: true, tweetId: '999' })
-    expect(await client.replyToTweet({ tweetId: '42', text: 'again' })).toEqual({ ok: true, tweetId: '999' })
+    // Two ids in the same second differ only by one random byte, so two posts collide
+    // once in 256 runs. Five make that impossible to see.
+    for (let post = 0; post < 5; post += 1) {
+      expect(await client.replyToTweet({ tweetId: '42', text: `hi ${post}` })).toEqual({ ok: true, tweetId: '999' })
+    }
 
-    expect(seen).toHaveLength(2)
+    expect(seen).toHaveLength(5)
     for (const value of seen) {
       expect(Buffer.from(value, 'base64')).toHaveLength(70)
     }
     // A fresh value per request, from one shell fetch that the store keeps.
-    expect(seen[0]).not.toBe(seen[1])
+    expect(new Set(seen).size).toBeGreaterThan(1)
     expect(shellRequests).toBe(1)
   })
 
@@ -201,7 +204,7 @@ describe('composer heading', () => {
   const stateWithTweet = (draft: string, sending = false) => {
     const tweets = parseTweetsFromInstructions([{ entries: [{ content: { itemContent: { tweet_results: { result: makeTweetResult('42', 'alice', 'hi') } } } }] }])
     const base = mergeTimelinePage(initialAppState(), 'following', tweets, {})
-    return { ...base, composer: { open: true, replyToTweetId: '42', draft, sending } }
+    return { ...base, composer: { open: true, mode: 'reply' as const, targetTweetId: '42', draft, caret: draft.length, sending } }
   }
 
   test('names the handle and counts the draft', () => {
@@ -271,7 +274,7 @@ describe('the composer drawer', () => {
 
 describe('a failed reply on screen', () => {
   test('shows the automation gate code and keeps the draft', () => {
-    const failure = replyFailure({ error: 'This request looks like it might be automated.', code: 226 }, '/tmp/tweeter.log')
+    const failure = writeFailure('reply', { error: 'This request looks like it might be automated.', code: 226 }, '/tmp/tweeter.log')
     expect(failure.error).toContain('code 226')
     expect(failure.error).toContain('The draft is kept')
     expect(failure.error).toContain('/tmp/tweeter.log')
@@ -280,8 +283,12 @@ describe('a failed reply on screen', () => {
   })
 
   test('still says what happened when X gives no code', () => {
-    const failure = replyFailure({ error: 'X refused the reply and gave no reason' }, '/tmp/tweeter.log')
+    const failure = writeFailure('reply', { error: 'X refused the reply and gave no reason' }, '/tmp/tweeter.log')
     expect(failure.error).toStartWith('X refused the reply and gave no reason\n')
     expect(failure.status).toBe('reply failed (no code); log: /tmp/tweeter.log')
+  })
+
+  test('names the write that failed, so a quote does not report as a reply', () => {
+    expect(writeFailure('quote', { error: 'nope', code: 226 }, '/tmp/tweeter.log').status).toStartWith('quote failed (226)')
   })
 })

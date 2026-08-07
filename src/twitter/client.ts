@@ -5,6 +5,7 @@ import { HeaderBuilder } from './headers.ts'
 import { PageContextStore } from './pageContext.ts'
 import { QueryIdStore } from './queryIds.ts'
 import { generateTransactionId } from './transactionId.ts'
+import { statusUrl } from './urls.ts'
 import type { AuthStatus, ConversationPage, DeleteResult, LikeResult, PostResult, TimelinePage, TweetBundle, TwitterClientOptions, WriteRetryNotice } from './types.ts'
 import { extractCursorFromInstructions, getHomeInstructions, getTweetDetailInstructions, parseConversationTweets, parseHomeTweets } from './extract/index.ts'
 import { getMap, getSlice, getStr, isRecord } from '../utils/guards.ts'
@@ -202,14 +203,27 @@ export class TwitterClient {
   // The web app posts a reply with the same cookies it reads with, so the TUI does too.
   // The reply block is what makes CreateTweet answer a tweet instead of starting one.
   async replyToTweet(args: { tweetId: string; text: string; onRetry?: (notice: WriteRetryNotice) => void }): Promise<PostResult> {
+    return this.createTweet({
+      reply: { in_reply_to_tweet_id: args.tweetId, exclude_reply_user_ids: [] }
+    }, args.text, args.onRetry)
+  }
+
+  // A repost with your own words is one CreateTweet that carries the quoted tweet as a link,
+  // which is what x.com sends. It starts a tweet rather than answering one, so it takes no
+  // reply block. X does not count the link against the 280 characters.
+  async quoteTweet(args: { tweetId: string; handle: string; text: string; onRetry?: (notice: WriteRetryNotice) => void }): Promise<PostResult> {
+    return this.createTweet({ attachment_url: statusUrl(args.handle, args.tweetId) }, args.text, args.onRetry)
+  }
+
+  private async createTweet(extra: Record<string, unknown>, text: string, onRetry?: (notice: WriteRetryNotice) => void): Promise<PostResult> {
     const variables: Record<string, unknown> = {
-      tweet_text: args.text,
-      reply: { in_reply_to_tweet_id: args.tweetId, exclude_reply_user_ids: [] },
+      tweet_text: text,
+      ...extra,
       dark_request: false,
       media: { media_entities: [], possibly_sensitive: false },
       semantic_annotation_ids: []
     }
-    return this.withWriteRetry('CreateTweet', args.onRetry, async () => {
+    return this.withWriteRetry('CreateTweet', onRetry, async () => {
       try {
         const { body, status } = await this.withQueryIdRetry('CreateTweet', [], async (queryId) => {
           return this.gql.post('CreateTweet', queryId, variables, buildCreateTweetFeatures(), undefined, this.headers.jsonHeaders({ referer: 'https://x.com/home' }))

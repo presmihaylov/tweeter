@@ -1,15 +1,15 @@
 import { CliRenderEvents, createCliRenderer } from '@opentui/core'
-import type { AppMedia, AuthStatus, PostResult } from '../twitter/types.ts'
+import type { AppMedia, AuthStatus, PostResult, WriteRetryNotice } from '../twitter/types.ts'
 import { TwitterClient } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { applyLike, beginConversationLoad, clearDetailSelection, enterSelection, failConversationLoad, focusDetailText, focusedTweet, initialAppState, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeTimelinePage, needsOlderTweets, needsReplies, previewOf, selectFirstReply, selectRelativeDetail, selectRelativeTweet, setFeedSort, toggleLightbox, videoOf, type AppState, type FeedId, type TimelineState } from '../state/store.ts'
-import { createMainScreen, replyFailure, retryStatus } from './mainScreen.ts'
+import { applyLike, beginConversationLoad, clearDetailSelection, closeComposer, deleteFromDraft, enterSelection, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeTimelinePage, moveComposerCaret, needsOlderTweets, needsReplies, openComposer, previewOf, previewsOf, selectFirstReply, selectRelativeDetail, selectRelativeTweet, setFeedSort, toggleLightbox, videoOf, type AppState, type FeedId, type TimelineState } from '../state/store.ts'
+import { createMainScreen, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
-import { isCtrlEnterKey, isEnterKey } from './keyEvents.ts'
+import { caretMoveFor, isCtrlEnterKey, isEnterKey, isTextInput } from './keyEvents.ts'
 import { createImageLayer, writeToTerminal, type ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize } from '../media/geometry.ts'
 import { detectImageRenderer } from '../media/detect.ts'
@@ -77,10 +77,12 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     let state: AppState = initialAppState()
     const session: { auth?: AuthStatus } = {}
 
-    const openPhoto = (source: 'tweet' | 'quote'): void => {
+    // A tweet holds up to four pictures, so the index says which tile the reader clicked.
+    const openPhoto = (source: 'tweet' | 'quote', index = 0): void => {
       const focused = focusedTweet(state)
       const tweet = source === 'quote' ? focused?.quotedTweet : focused
-      state = toggleLightbox(state, tweet, previewOf(tweet))
+      const media = previewsOf(tweet)[index]
+      state = toggleLightbox(state, tweet, media, tweet ? `${tweet.id}:${index}` : undefined)
       rerender()
     }
     // An article image belongs to the body, not to the tweet, so it carries its own key.
@@ -233,37 +235,39 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     }
 
     const sendComposer = async (): Promise<void> => {
-      const replyToTweetId = state.composer.replyToTweetId
+      const targetId = state.composer.targetTweetId
+      const target = targetId ? state.tweets[targetId] : undefined
+      const mode = state.composer.mode
+      const what = mode === 'quote' ? 'quote' : 'reply'
       const text = state.composer.draft.trim()
-      if (!replyToTweetId || text === '') {
+      if (!target || text === '') {
         return
       }
       // X counts the characters itself, but a local check saves a round trip and keeps
       // the draft in the composer instead of losing it to a server refusal.
       if (text.length > tweetTextLimit) {
-        const message = `reply is ${text.length} characters; the limit is ${tweetTextLimit}`
+        const message = `the ${what} is ${text.length} characters; the limit is ${tweetTextLimit}`
         state = { ...state, composer: { ...state.composer, sending: false, error: message }, status: message }
         rerender()
         return
       }
-      state = { ...state, composer: { ...state.composer, sending: true, error: undefined }, status: 'sending reply' }
+      state = { ...state, composer: { ...state.composer, sending: true, error: undefined }, status: `sending ${what}` }
       rerender()
-      await debugLogger.log('ui.reply.submit', { replyToTweetId, textLength: text.length })
-      const result: PostResult = await client.replyToTweet({
-        tweetId: replyToTweetId,
-        text,
-        onRetry: (notice) => {
-          state = { ...state, status: retryStatus('reply', notice) }
-          rerender()
-        }
-      })
+      await debugLogger.log('ui.composer.submit', { mode, targetTweetId: target.id, textLength: text.length })
+      const onRetry = (notice: WriteRetryNotice): void => {
+        state = { ...state, status: retryStatus(what, notice) }
+        rerender()
+      }
+      const result: PostResult = mode === 'quote'
+        ? await client.quoteTweet({ tweetId: target.id, handle: target.author.handle, text, onRetry })
+        : await client.replyToTweet({ tweetId: target.id, text, onRetry })
       if (result.ok) {
-        state = { ...state, composer: { open: false, draft: '', sending: false }, status: `sent reply ${result.tweetId}` }
+        state = { ...closeComposer(state, `sent ${what} ${result.tweetId}`) }
         rerender()
         return
       }
-      await debugLogger.log('ui.reply.failed', { replyToTweetId, error: result.error, status: result.status, code: result.code, logPath: debugLogger.path })
-      const failure = replyFailure(result, debugLogger.path)
+      await debugLogger.log('ui.composer.failed', { mode, targetTweetId: target.id, error: result.error, status: result.status, code: result.code, logPath: debugLogger.path })
+      const failure = writeFailure(what, result, debugLogger.path)
       state = { ...state, composer: { ...state.composer, sending: false, error: failure.error }, status: failure.status }
       rerender()
     }
@@ -279,22 +283,29 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         return
       }
       if (key.name === 'escape') {
-        state = { ...state, composer: { open: false, draft: '', sending: false }, status: 'composer closed' }
+        state = closeComposer(state)
         rerender()
         return
       }
+      // The drawer is a text field while it is open, so it answers every key itself.
       if (state.composer.open) {
         if (isCtrlEnterKey(key) || isEnterKey(key)) {
           void sendComposer()
           return
         }
-        if (key.name === 'backspace') {
-          state = { ...state, composer: { ...state.composer, draft: state.composer.draft.slice(0, -1) } }
+        const move = caretMoveFor(key)
+        if (move) {
+          state = moveComposerCaret(state, move)
           rerender()
           return
         }
-        if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.meta) {
-          state = { ...state, composer: { ...state.composer, draft: `${state.composer.draft}${key.sequence}` } }
+        if (key.name === 'backspace' || key.name === 'delete') {
+          state = deleteFromDraft(state, key.name === 'delete' ? 1 : -1)
+          rerender()
+          return
+        }
+        if (isTextInput(key)) {
+          state = insertIntoDraft(state, key.sequence)
           rerender()
         }
         return
@@ -403,8 +414,15 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         void toggleLike()
         return
       }
-      if (key.name === 'r' && focusedTweet(state)) {
-        state = { ...state, composer: { open: true, replyToTweetId: focusedTweet(state)?.id, draft: '', sending: false }, status: 'reply composer' }
+      if (key.name === 'r') {
+        state = openComposer(state, 'reply')
+        rerender()
+        return
+      }
+      // x.com puts the repost on t, and a repost here always carries the reader's own words:
+      // the plain repost is the one write the TUI does not do.
+      if (key.name === 't') {
+        state = openComposer(state, 'quote')
         rerender()
         return
       }

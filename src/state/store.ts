@@ -25,6 +25,14 @@ export type ConversationState = {
 
 export type LightboxState = { key: string; url: string; label: string; width?: number; height?: number }
 
+// Both writes are a draft against the tweet the reader is on, so one drawer serves both.
+// A reply answers that tweet; a quote reposts it with the draft on top.
+export type ComposerMode = 'reply' | 'quote'
+
+// Where the next character lands, counted in characters from the start of the draft. The
+// drawer is a text field, so a keystroke acts here and not at the end of the draft.
+export type CaretMove = 'left' | 'right' | 'start' | 'end' | 'wordLeft' | 'wordRight'
+
 export type AppState = {
   tweets: Record<string, AppTweet>
   activeFeed: FeedId
@@ -32,7 +40,7 @@ export type AppState = {
   timelines: Record<FeedId, TimelineState>
   conversations: Record<string, ConversationState>
   selectedTweetId?: string
-  composer: { open: boolean; replyToTweetId?: string; draft: string; error?: string; sending: boolean }
+  composer: { open: boolean; mode: ComposerMode; targetTweetId?: string; draft: string; caret: number; error?: string; sending: boolean }
   lightbox?: LightboxState
   // Quoted tweets and replies are not in the timeline, so drilling into one pushes here
   // instead of moving the timeline cursor. The top of the stack is what the pane shows.
@@ -56,7 +64,7 @@ export const initialAppState = (): AppState => ({
     forYou: { id: 'forYou', tweetIds: [], loading: false }
   },
   conversations: {},
-  composer: { open: false, draft: '', sending: false },
+  composer: { open: false, mode: 'reply', draft: '', caret: 0, sending: false },
   detailStack: [],
   textFocused: false,
   status: 'starting'
@@ -181,15 +189,89 @@ export const mergeConversationPage = (state: AppState, tweetId: string, replies:
   }
 }
 
-// The home timeline sends an article as its title alone, so the tweet detail holds the only
-// copy with the body. That copy replaces the feed copy, except for the repost mark, which
-// the tweet detail does not carry because only the feed knows who put the tweet there.
+// The feed copy and the tweet detail copy each hold something the other misses, so the
+// merge takes the fuller side of each field instead of one whole copy. The feed sends an
+// article as its title alone, and it nests a quote one level, so the quote inside a quote
+// reaches the map empty and only the tweet detail can fill it. The other way round, only
+// the feed knows who reposted the tweet into it.
 export const mergeFocalTweet = (state: AppState, focal: AppTweet): AppState => {
   const existing = state.tweets[focal.id]
-  if (existing !== undefined && focal.text.length <= existing.text.length) {
+  if (existing === undefined) {
+    return mergeTweets(state, [focal])
+  }
+  return mergeTweets(state, [{
+    ...existing,
+    ...focal,
+    text: focal.text.length >= existing.text.length ? focal.text : existing.text,
+    media: focal.media.length > 0 ? focal.media : existing.media,
+    article: focal.article ?? existing.article,
+    quotedTweet: focal.quotedTweet ?? existing.quotedTweet,
+    quotedTweetId: focal.quotedTweetId ?? existing.quotedTweetId,
+    repostedBy: existing.repostedBy ?? focal.repostedBy
+  }])
+}
+
+// The drawer writes against the open tweet, not the timeline cursor, so a quote of a
+// drilled-in tweet quotes that tweet.
+export const openComposer = (state: AppState, mode: ComposerMode): AppState => {
+  const target = focusedTweet(state)
+  if (!target) {
     return state
   }
-  return mergeTweets(state, [existing?.repostedBy ? { ...focal, repostedBy: existing.repostedBy } : focal])
+  return {
+    ...state,
+    composer: { open: true, mode, targetTweetId: target.id, draft: '', caret: 0, sending: false },
+    status: mode === 'quote' ? `quoting @${target.author.handle}` : `replying to @${target.author.handle}`
+  }
+}
+
+export const closeComposer = (state: AppState, status = 'composer closed'): AppState =>
+  ({ ...state, composer: { open: false, mode: state.composer.mode, draft: '', caret: 0, sending: false }, status })
+
+const withDraft = (state: AppState, draft: string, caret: number): AppState =>
+  ({ ...state, composer: { ...state.composer, draft, caret: Math.max(0, Math.min(draft.length, caret)) } })
+
+export const insertIntoDraft = (state: AppState, text: string): AppState => {
+  const { draft, caret } = state.composer
+  return withDraft(state, `${draft.slice(0, caret)}${text}${draft.slice(caret)}`, caret + text.length)
+}
+
+// -1 is Backspace and takes the character behind the caret; 1 is Delete and takes the one
+// in front of it.
+export const deleteFromDraft = (state: AppState, direction: -1 | 1): AppState => {
+  const { draft, caret } = state.composer
+  const cut = direction === -1 ? caret - 1 : caret
+  if (cut < 0 || cut >= draft.length) {
+    return state
+  }
+  return withDraft(state, `${draft.slice(0, cut)}${draft.slice(cut + 1)}`, cut)
+}
+
+// A word jump lands where the word starts, so it first steps over the spaces between them.
+const wordEdge = (draft: string, caret: number, step: -1 | 1): number => {
+  const at = (index: number): string => (step === -1 ? draft[index - 1] ?? '' : draft[index] ?? '')
+  const limit = step === -1 ? 0 : draft.length
+  let index = caret
+  while (index !== limit && at(index) === ' ') {
+    index += step
+  }
+  while (index !== limit && at(index) !== ' ') {
+    index += step
+  }
+  return index
+}
+
+export const moveComposerCaret = (state: AppState, move: CaretMove): AppState => {
+  const { draft, caret } = state.composer
+  const next = {
+    left: caret - 1,
+    right: caret + 1,
+    start: 0,
+    end: draft.length,
+    wordLeft: wordEdge(draft, caret, -1),
+    wordRight: wordEdge(draft, caret, 1)
+  }[move]
+  return withDraft(state, draft, next)
 }
 
 export const beginConversationLoad = (state: AppState, tweetId: string): AppState => {
@@ -233,6 +315,12 @@ export const toggleLightbox = (state: AppState, tweet: AppTweet | undefined, med
 // A video and an animated gif both carry a still frame at `url`, so every media kind has
 // something the terminal can draw. Only the mp4 itself has to be opened outside.
 export const previewOf = (tweet: AppTweet | undefined): AppMedia | undefined => tweet?.media[0]
+
+// X puts up to four pictures on one tweet and draws them as a grid, so the pane owes the
+// reader every one of them, not only the first.
+export const mediaTileCap = 4
+
+export const previewsOf = (tweet: AppTweet | undefined): AppMedia[] => tweet?.media.slice(0, mediaTileCap) ?? []
 
 export const videoOf = (tweet: AppTweet | undefined): AppVideo | undefined =>
   tweet?.media.find((item): item is AppVideo => item.type !== 'photo' && item.videoUrl !== undefined)

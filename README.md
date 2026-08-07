@@ -63,12 +63,17 @@ Pasting the full `Cookie` request header is the most reliable route, because X s
 - `Shift+←` — go back to the tweet you came from
 - `Ctrl+S` / `Ctrl+W` — scroll the open tweet's text down / up when it is longer than the pane
 - `Enter` — load the next page of replies for the open tweet
-- `p` — enlarge the open tweet's photo, or the article picture on the screen (click a picture does the same; `p`, `Esc`, `Enter` or a click closes it)
+- `p` — enlarge the open tweet's first photo, or the article picture on the screen (a click enlarges the picture you clicked; `p`, `Esc`, `Enter` or a click closes it)
 - `v` — hand the open tweet's video to your system player
 - `o` — open the open tweet in your browser
 - `l` — like the open tweet, or take the like back
 - `r` — reply to the open tweet; type, then `Enter` sends and `Esc` closes
+- `t` — repost the open tweet with your own words; the same drawer opens and posts a quote
 - `q` — quit
+
+The drawer is a text field. `←` / `→` move the caret, `Alt+←` / `Alt+→` jump a word, `Home` / `End` (or `Ctrl+A` / `Ctrl+E`) reach the two ends, and `Backspace` / `Delete` take the character on either side of it. A paste lands whole.
+
+A tweet with several photos draws them side by side, up to the four X allows. Click one to enlarge it.
 
 ## Scripts
 

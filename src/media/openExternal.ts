@@ -1,10 +1,8 @@
 import { spawn } from 'node:child_process'
 import type { AppTweet } from '../twitter/types.ts'
+import { statusUrl } from '../twitter/urls.ts'
 
-// x.com ignores the handle segment and redirects to the canonical one, so a stale
-// or missing handle still resolves.
-export const tweetUrl = (tweet: AppTweet): string =>
-  `https://x.com/${tweet.author.handle || 'i'}/status/${tweet.id}`
+export const tweetUrl = (tweet: AppTweet): string => statusUrl(tweet.author.handle, tweet.id)
 
 export const openExternal = (url: string): void => {
   const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open'

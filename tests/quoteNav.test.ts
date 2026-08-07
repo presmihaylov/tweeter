@@ -7,6 +7,7 @@ import {
   focusedTweet,
   initialAppState,
   leaveSelection,
+  mergeFocalTweet,
   mergeTimelinePage,
   selectRelativeTweet,
   toggleLightbox,
@@ -81,6 +82,24 @@ describe('quote navigation', () => {
     expect(leaveSelection(state).lightbox).toBeUndefined()
   })
 
+  // The feed nests a quote one level, so a quote that quotes a third tweet reaches the map
+  // empty. Only the tweet detail of that quote carries the third tweet.
+  test('the tweet detail fills in the quote the feed left out', () => {
+    const state = enterSelection(feedWithQuote(tweet('q1')))
+    expect(focusedTweet(state)?.quotedTweet).toBeUndefined()
+    const filled = mergeFocalTweet(state, { ...tweet('q1'), quotedTweet: tweet('q2'), quotedTweetId: 'q2' })
+    expect(focusedTweet(filled)?.quotedTweet?.id).toBe('q2')
+    // The third tweet has to reach the map as well, or it could not be opened in turn.
+    expect(filled.tweets['q2']?.id).toBe('q2')
+    expect(enterSelection(filled).detailStack).toEqual(['q1', 'q2'])
+  })
+
+  test('the tweet detail never drops the quote the feed already had', () => {
+    const state = feedWithQuote(tweet('q1'))
+    const merged = mergeFocalTweet(state, { ...tweet('1', [photo]), text: 'tweet 1' })
+    expect(merged.tweets['1']?.quotedTweet?.id).toBe('q1')
+  })
+
   test('the hint line states how to go in and how to come back', () => {
     expect(detailHint(tweet('1', [], tweet('q1')), 0)).toBe('Shift+→ or click the quote')
     expect(detailHint(tweet('q1'), 1)).toBe('depth 1  ·  Shift+← back')
@@ -138,7 +157,7 @@ describe('quote card clicks', () => {
 
   test('a click on the quoted photo enlarges it instead of opening the quote', async () => {
     const harness = await setup()
-    const box = rect(harness.screen, 'media:q1')
+    const box = rect(harness.screen, 'media:q1:0')
     await harness.mouse.click(box.col, box.row)
     expect(harness.photos).toEqual(['quote'])
     expect(harness.quotes).toBe(0)
@@ -148,7 +167,7 @@ describe('quote card clicks', () => {
     const harness = await setup()
     await harness.draw(enterSelection(harness.state))
     const keys = harness.screen.placements().map((item) => item.key)
-    expect(keys).toContain('media:q1')
-    expect(keys).not.toContain('media:1')
+    expect(keys).toContain('media:q1:0')
+    expect(keys).not.toContain('media:1:0')
   })
 })

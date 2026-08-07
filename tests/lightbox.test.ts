@@ -62,7 +62,7 @@ const rect = (screen: MainScreen, key: string): ImagePlacement => {
 describe('lightbox', () => {
   test('a click on the detail photo asks to open it', async () => {
     const harness = await setup()
-    const box = rect(harness.screen, 'media:1')
+    const box = rect(harness.screen, 'media:1:0')
     await harness.mouse.click(box.col, box.row)
     await harness.flush()
     expect(harness.clicks).toEqual(['tweet'])
@@ -70,7 +70,7 @@ describe('lightbox', () => {
 
   test('a click on the quoted photo names the quote', async () => {
     const harness = await setup()
-    const box = rect(harness.screen, 'media:q1')
+    const box = rect(harness.screen, 'media:q1:0')
     await harness.mouse.click(box.col, box.row)
     await harness.flush()
     expect(harness.clicks).toEqual(['quote'])
@@ -78,7 +78,7 @@ describe('lightbox', () => {
 
   test('the open photo is far larger than the one in the detail pane', async () => {
     const harness = await setup()
-    const inPane = rect(harness.screen, 'media:1')
+    const inPane = rect(harness.screen, 'media:1:0')
     harness.screen.render(toggleLightbox(harness.state, harness.state.tweets['1'], photo))
     await harness.flush()
     const enlarged = rect(harness.screen, 'lightbox:1')
