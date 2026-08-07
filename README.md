@@ -75,6 +75,8 @@ The drawer is a text field. `←` / `→` move the caret, `Alt+←` / `Alt+→` 
 
 A tweet with several photos draws them side by side, up to the four X allows. Click one to enlarge it.
 
+Every card carries how long ago the tweet went out, on the right of the author line: `now`, `45s`, `5m`, `3h`, `2d`, and then the calendar day (`Jul 30`, or `Mar 9, 2024` for another year). The open tweet says the same next to its handle, and its counts line ends with the exact clock and date in your own timezone.
+
 ## Scripts
 
 - `bun run dev` — run the TUI from source

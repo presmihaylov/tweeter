@@ -4,6 +4,7 @@ import type { AppMedia, AppTweet, AuthStatus, WriteRetryNotice } from '../twitte
 import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize, fitCells } from '../media/geometry.ts'
+import { absoluteTime, relativeTime } from '../utils/time.ts'
 
 export type MainScreen = {
   render(state: AppState, auth?: AuthStatus): void
@@ -23,6 +24,8 @@ export type MainScreenOptions = {
   onOpenQuote?: () => void
   onOpenTweet?: (tweetId: string) => void
   onOpenArticleImage?: (media: AppMedia, key: string) => void
+  // A relative stamp is only relative to something. A test pins the clock so "3h" stays "3h".
+  now?: () => Date
 }
 
 // Reserved cells; toPlacement shrinks this to the largest square the font metrics allow.
@@ -307,6 +310,7 @@ type ImageSlot = {
 type TileRow = { tiles: BoxRenderable[]; slots: ImageSlot[] }
 
 export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions = {}): MainScreen => {
+  const now = opts.now ?? ((): Date => new Date())
   const shell = new BoxRenderable(renderer, {
     id: 'main-shell',
     width: '100%',
@@ -655,16 +659,36 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     flexDirection: 'column',
     gap: 1
   })
-  // Anchored last so the counts always sit on the bottom row of the pane.
+  // Anchored last so the counts always sit on the bottom row of the pane. The exact date
+  // rides on the right of the same row, where a long view count cannot push it off.
+  const detailMetricsRow = new BoxRenderable(renderer, {
+    id: 'detail-metrics-row',
+    width: '100%',
+    height: 1,
+    flexShrink: 0,
+    flexDirection: 'row',
+    gap: 1
+  })
   const detailMetrics = new TextRenderable(renderer, {
     id: 'detail-metrics',
     content: '',
     fg: '#7d8590',
-    width: '100%',
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
     height: 1,
-    flexShrink: 0,
     truncate: true
   })
+  const detailPosted = new TextRenderable(renderer, {
+    id: 'detail-posted',
+    content: '',
+    fg: '#7d8590',
+    flexShrink: 0,
+    width: 0,
+    height: 1
+  })
+  detailMetricsRow.add(detailMetrics)
+  detailMetricsRow.add(detailPosted)
   detailPane.add(parentBox)
   detailPane.add(detailAuthorRow)
   detailPane.add(detailBody)
@@ -673,7 +697,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   detailPane.add(quoteBox)
   detailPane.add(repliesHeader)
   detailPane.add(repliesList)
-  detailPane.add(detailMetrics)
+  detailPane.add(detailMetricsRow)
 
   body.add(rail)
   body.add(timelinePane)
@@ -931,13 +955,11 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       const card = cardBox(renderer, `reply-card-${id}`, selected)
       const avatar = new BoxRenderable(renderer, { id: `reply-card-${id}-avatar`, width: avatarCols, height: avatarRows })
       const column = new BoxRenderable(renderer, { id: `reply-card-${id}-column`, flexGrow: 1, height: '100%', flexDirection: 'column' })
-      column.add(new TextRenderable(renderer, {
+      column.add(authorRow(renderer, {
         id: `reply-card-${id}-author`,
-        content: `${articlePill(reply)}${repostPill(reply)}${reply.author.name}${reply.author.verified ? ' ✔' : ''}  @${reply.author.handle}${reply.quotedTweet ? '  quote' : ''}`,
-        fg: selected ? '#58a6ff' : '#f0f6fc',
-        width: '100%',
-        height: 1,
-        truncate: true
+        author: `${articlePill(reply)}${repostPill(reply)}${reply.author.name}${reply.author.verified ? ' ✔' : ''}  @${reply.author.handle}${reply.quotedTweet ? '  quote' : ''}`,
+        posted: relativeTime(reply.createdAt, now()),
+        fg: selected ? '#58a6ff' : '#f0f6fc'
       }))
       column.add(new TextRenderable(renderer, {
         id: `reply-card-${id}-body`,
@@ -1005,13 +1027,11 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
         flexDirection: 'column'
       })
       const mediaPill = tweet.media.length > 0 ? `  ${tweet.media.map((item) => item.type === 'photo' ? 'image' : item.type).join(' · ')}` : ''
-      column.add(new TextRenderable(renderer, {
+      column.add(authorRow(renderer, {
         id: `tweet-card-${id}-author`,
-        content: `${articlePill(tweet)}${repostPill(tweet)}${tweet.author.name}${tweet.author.verified ? ' ✔' : ''}  @${tweet.author.handle}${mediaPill}`,
-        fg: selected ? '#58a6ff' : '#f0f6fc',
-        width: '100%',
-        height: 1,
-        truncate: true
+        author: `${articlePill(tweet)}${repostPill(tweet)}${tweet.author.name}${tweet.author.verified ? ' ✔' : ''}  @${tweet.author.handle}${mediaPill}`,
+        posted: relativeTime(tweet.createdAt, now()),
+        fg: selected ? '#58a6ff' : '#f0f6fc'
       }))
       column.add(new TextRenderable(renderer, {
         id: `tweet-card-${id}-body`,
@@ -1060,7 +1080,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
         detailScroll = 0
       }
       detailAuthorName.content = focused ? `${focused.author.name}${focused.author.verified ? ' ✔' : ''}` : ''
-      detailAuthorHandle.content = focused ? `${articlePill(focused)}@${focused.author.handle}${focused.repostedBy ? `  ·  ↻ ${focused.repostedBy.name} reposted` : ''}` : ''
+      detailAuthorHandle.content = focused ? `${articlePill(focused)}@${focused.author.handle}${postedPill(focused, now())}${focused.repostedBy ? `  ·  ↻ ${focused.repostedBy.name} reposted` : ''}` : ''
       detailAvatarSlot = focused?.author.avatarUrl
         ? { key: `avatar:detail:${focused.id}`, url: focused.author.avatarUrl, box: detailAvatar, pane: detailPane, width: 1, height: 1, minCols: avatarCols, minRows: avatarRows }
         : undefined
@@ -1090,7 +1110,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       parentBox.height = layout.parent
       parentBox.borderColor = parentSelected ? '#58a6ff' : '#30363d'
       parentBox.backgroundColor = parentSelected ? '#111b2b' : '#0d1117'
-      parentAuthor.content = parent ? `↩ Replying to ${parent.author.name}${parent.author.verified ? ' ✔' : ''}  @${parent.author.handle}` : ''
+      parentAuthor.content = parent ? `↩ Replying to ${parent.author.name}${parent.author.verified ? ' ✔' : ''}  @${parent.author.handle}${postedPill(parent, now())}` : ''
       parentAuthor.fg = parentSelected ? '#58a6ff' : '#f0f6fc'
       parentText.content = parent ? decodeEntities(parent.text).replaceAll('\n', ' ') : ''
       parentAvatarSlot = parent?.author.avatarUrl && layout.parent > 0
@@ -1098,6 +1118,9 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
         : undefined
       parentBox.onMouseDown = parent ? () => { opts.onOpenTweet?.(parent.id) } : undefined
       detailMetrics.content = focused ? metricsLine(focused) : ''
+      const postedStamp = focused ? absoluteTime(focused.createdAt) : ''
+      detailPosted.content = postedStamp
+      detailPosted.width = postedStamp.length
       repliesList.height = layout.replies
       // An empty image box would still claim its share of the pane, so hide it.
       mediaBox.visible = layout.media > 0
@@ -1107,7 +1130,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       quoteBox.height = layout.quote
       const quoteMediaRows = layout.quote - quoteRows
       quoteMediaBox.visible = quotePhoto !== undefined && quoteMediaRows > 0
-      quoteAuthor.content = quoted ? `${quoted.author.name}${quoted.author.verified ? ' ✔' : ''}  @${quoted.author.handle}` : ''
+      quoteAuthor.content = quoted ? `${quoted.author.name}${quoted.author.verified ? ' ✔' : ''}  @${quoted.author.handle}${postedPill(quoted, now())}` : ''
       quoteText.content = quoted ? decodeEntities(quoted.text).replaceAll('\n', ' ') : ''
       quoteAvatarSlot = quoted?.author.avatarUrl
         ? { key: `avatar:${quoted.id}`, url: quoted.author.avatarUrl, box: quoteAvatar, pane: quoteBox, width: 1, height: 1, minCols: avatarCols, minRows: avatarRows }
@@ -1166,6 +1189,41 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       renderer.requestRender()
     }
   }
+}
+
+// The name and the handle already fill a card line, so an appended stamp is the first
+// thing truncate throws away. The stamp gets its own cell instead, and only the name gives
+// ground when the card is narrow.
+const authorRow = (
+  renderer: CliRenderer,
+  args: { id: string; author: string; posted: string; fg: string }
+): BoxRenderable => {
+  const row = new BoxRenderable(renderer, { id: args.id, width: '100%', height: 1, flexShrink: 0, flexDirection: 'row', gap: 1 })
+  row.add(new TextRenderable(renderer, {
+    id: `${args.id}-text`,
+    content: args.author,
+    fg: args.fg,
+    flexGrow: 1,
+    // Yoga defaults flexShrink to 0, not to the CSS 1, so a long name would push the stamp
+    // off the row instead of giving ground to it.
+    flexShrink: 1,
+    minWidth: 0,
+    height: 1,
+    truncate: true
+  }))
+  if (args.posted !== '') {
+    // Yoga measures a text box from its content and then shrinks it anyway, so the stamp
+    // states its own width. Without it "5d" reaches the screen as "5".
+    row.add(new TextRenderable(renderer, {
+      id: `${args.id}-posted`,
+      content: args.posted,
+      fg: '#7d8590',
+      flexShrink: 0,
+      width: args.posted.length,
+      height: 1
+    }))
+  }
+  return row
 }
 
 const cardBox = (renderer: CliRenderer, id: string, selected: boolean): BoxRenderable => {
@@ -1238,6 +1296,13 @@ export const repostPill = (tweet: AppTweet): string =>
 // an ordinary tweet whose text happens to stop after the title. It goes in front of the
 // name, because a card line is narrow and a truncated line loses its end first.
 export const articlePill = (tweet: AppTweet | undefined): string => (tweet?.article ? '▤ article · ' : '')
+
+// The detail pane is wide, so the stamp rides on the line that already carries the handle.
+// A tweet X sent without a date says nothing rather than an empty separator.
+export const postedPill = (tweet: AppTweet | undefined, now: Date): string => {
+  const stamp = relativeTime(tweet?.createdAt, now)
+  return stamp === '' ? '' : `  ·  ${stamp}`
+}
 
 // x.com fills the heart on a tweet you have liked. A count alone cannot show that, so the
 // filled glyph carries it here.
