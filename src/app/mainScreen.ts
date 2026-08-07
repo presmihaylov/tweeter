@@ -391,35 +391,58 @@ const packHelpGroups = (count: number): readonly HelpGroup[][] => {
   return stacks
 }
 
+// The stacks side by side with the gaps between them, and the rows of the tallest stack.
+export const helpContentWidth = (stacks: readonly (readonly HelpGroup[])[]): number =>
+  stacks.reduce((total, stack) => total + stackWidth(stack), 0) + helpColumnGap * (stacks.length - 1)
+
+export const helpContentHeight = (stacks: readonly (readonly HelpGroup[])[]): number =>
+  Math.max(...stacks.map((stack) => stack.reduce((total, group) => total + helpGroupRows(group), stack.length - 1)))
+
+const helpPadding = 2
+
+// The border, and the padding the card puts on each side of its keys.
+const helpChrome = 2 + helpPadding * 2
+
+// The smallest card that still shows every line whole.
+export const helpMinCardWidth = (stacks: readonly (readonly HelpGroup[])[]): number =>
+  helpContentWidth(stacks) + helpChrome
+
 // Three stacks side by side need a wide terminal. A narrow one gets fewer and taller stacks,
 // because a column squeezed below its widest line wraps every description in it.
 export const helpStacks = (width: number): readonly (readonly HelpGroup[])[] => {
   for (const count of [3, 2]) {
     const stacks = packHelpGroups(count)
-    if (helpCardWidth(stacks) <= width) {
+    if (helpMinCardWidth(stacks) <= width) {
       return stacks
     }
   }
   return packHelpGroups(1)
 }
 
-// The two border columns and the two padding columns the card adds around its stacks.
-export const helpCardWidth = (stacks: readonly (readonly HelpGroup[])[]): number =>
-  stacks.reduce((total, stack) => total + stackWidth(stack), 0) + helpColumnGap * (stacks.length - 1) + 4
+const clamp = (value: number, low: number, high: number): number => Math.min(Math.max(value, low), high)
 
-export const helpCardHeight = (stacks: readonly (readonly HelpGroup[])[]): number =>
-  Math.max(...stacks.map((stack) => stack.reduce((total, group) => total + helpGroupRows(group), stack.length - 1))) + 4
+// The card takes most of the window and centres its keys in it. A popup that hugs its own
+// text reads as a stray line of output rather than as a window over the app.
+const helpWidthShare = 0.8
+const helpHeightShare = 0.7
 
-// The card starts under the header and stops above the status row.
-const helpTop = 3
+export const helpCardWidth = (terminalWidth: number): number =>
+  clamp(Math.round(terminalWidth * helpWidthShare), helpMinCardWidth(helpStacks(terminalWidth)), terminalWidth)
 
-export const helpPopupHeight = (terminalWidth: number, terminalHeight: number): number =>
-  Math.min(helpCardHeight(helpStacks(terminalWidth)), Math.max(7, terminalHeight - helpTop - 2))
+export const helpCardHeight = (terminalWidth: number, terminalHeight: number): number =>
+  clamp(
+    Math.round(terminalHeight * helpHeightShare),
+    helpContentHeight(helpStacks(terminalWidth)) + helpChrome,
+    terminalHeight
+  )
 
 // One stack of every key needs about forty rows, which a short terminal does not have. What
 // does not fit scrolls, so no key is out of reach on any window.
 export const helpScrollMax = (terminalWidth: number, terminalHeight: number): number =>
-  helpCardHeight(helpStacks(terminalWidth)) - helpPopupHeight(terminalWidth, terminalHeight)
+  Math.max(
+    0,
+    helpContentHeight(helpStacks(terminalWidth)) + helpChrome - helpCardHeight(terminalWidth, terminalHeight)
+  )
 
 export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions = {}): MainScreen => {
   const now = opts.now ?? ((): Date => new Date())
@@ -906,26 +929,26 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   // The popup floats over the panes rather than replacing them, so the reader keeps their
   // place in the feed. It is the last child and sits above the rest, because a box that
   // shares the row with the panes would push them aside instead of covering them.
-  // The bordered card wants its own width, and an absolute box can only pin an edge, so a
-  // full-width row that centres one child is what puts the card in the middle.
+  // The bordered card wants its own size, and an absolute box can only pin an edge, so a
+  // box over the whole window that centres one child is what puts the card in the middle.
   const helpPopup = new BoxRenderable(renderer, {
     id: 'help-popup',
     position: 'absolute',
     left: 0,
     right: 0,
-    top: helpTop,
-    height: 1,
+    top: 0,
+    bottom: 0,
     zIndex: 100,
     shouldFill: false,
     flexDirection: 'row',
     justifyContent: 'center',
+    alignItems: 'center',
     visible: false
   })
   const helpCard = new BoxRenderable(renderer, {
     id: 'help-card',
     width: 1,
-    maxWidth: '98%',
-    height: '100%',
+    height: 1,
     border: true,
     borderStyle: 'rounded',
     borderColor: '#58a6ff',
@@ -934,15 +957,19 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     bottomTitle: ' ? or Esc closes ',
     bottomTitleAlignment: 'center',
     backgroundColor: '#0d1117',
-    padding: 1,
+    padding: helpPadding,
     // The stacks are as tall as the key list, which a short terminal cannot show at once.
     overflow: 'hidden',
-    flexDirection: 'column'
+    flexDirection: 'column',
+    // The keys keep their own width, so the card can be wider than they are.
+    alignItems: 'flex-start'
   })
-  // The rows the card cannot show are scrolled to by lifting this box above its own top edge.
+  // The keys sit in the middle of the card, and a short window scrolls them, both by the
+  // margins on this box. A margin is exact, where a centred child that outgrows its parent
+  // spills over both edges and loses the start of every line.
   const helpScroller = new BoxRenderable(renderer, {
     id: 'help-scroller',
-    width: '100%',
+    width: 1,
     flexShrink: 0,
     flexDirection: 'row',
     gap: helpColumnGap
@@ -953,14 +980,21 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   let helpStackCount = 0
   // The card is rebuilt only when the terminal changes how many stacks fit, which is rare.
   const layOutHelp = (scroll: number): void => {
-    const stacks = helpStacks(renderer.terminalWidth)
-    helpPopup.height = helpPopupHeight(renderer.terminalWidth, renderer.terminalHeight)
-    helpCard.width = helpCardWidth(stacks)
-    helpCard.bottomTitle = helpScrollMax(renderer.terminalWidth, renderer.terminalHeight) > 0
+    const { terminalWidth, terminalHeight } = renderer
+    const stacks = helpStacks(terminalWidth)
+    const cardWidth = helpCardWidth(terminalWidth)
+    const cardHeight = helpCardHeight(terminalWidth, terminalHeight)
+    const contentWidth = helpContentWidth(stacks)
+    const contentHeight = helpContentHeight(stacks)
+    helpCard.width = cardWidth
+    helpCard.height = cardHeight
+    helpCard.bottomTitle = helpScrollMax(terminalWidth, terminalHeight) > 0
       ? ' ↑ ↓ scrolls · ? or Esc closes '
       : ' ? or Esc closes '
-    helpScroller.height = helpCardHeight(stacks) - 4
-    helpScroller.marginTop = -scroll
+    helpScroller.width = contentWidth
+    helpScroller.height = contentHeight
+    helpScroller.marginLeft = Math.max(0, Math.floor((cardWidth - helpChrome - contentWidth) / 2))
+    helpScroller.marginTop = Math.max(0, Math.floor((cardHeight - helpChrome - contentHeight) / 2)) - scroll
     if (stacks.length === helpStackCount) {
       return
     }
@@ -971,9 +1005,10 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     stacks.forEach((groups, index) => {
       const stack = new BoxRenderable(renderer, {
         id: `help-stack-${index}`,
-        flexBasis: Math.max(...groups.map(helpColumnWidth)),
-        flexGrow: 1,
-        flexShrink: 1,
+        // The scroller is exactly as wide as its stacks, so a stack takes its own width and
+        // neither grows nor shrinks. A squeezed stack wraps every description in it.
+        width: Math.max(...groups.map(helpColumnWidth)),
+        flexShrink: 0,
         height: '100%',
         flexDirection: 'column',
         gap: 1

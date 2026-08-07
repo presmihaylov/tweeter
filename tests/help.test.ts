@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createTestRenderer } from '@opentui/core/testing'
-import { createMainScreen, helpCardWidth, helpColumn, helpGroups, helpHint, helpScrollMax, helpStacks } from '../src/app/mainScreen.ts'
+import { createMainScreen, helpCardHeight, helpCardWidth, helpColumn, helpContentHeight, helpContentWidth, helpGroups, helpHint, helpMinCardWidth, helpScrollMax, helpStacks } from '../src/app/mainScreen.ts'
 import { helpScrollStep, isHelpKey } from '../src/app/keyEvents.ts'
 import { closeHelp, initialAppState, mergeTimelinePage, scrollHelp, toggleHelp } from '../src/state/store.ts'
 import type { AppKey } from '../src/app/keyEvents.ts'
@@ -93,8 +93,26 @@ describe('how the groups sit in the card', () => {
 
   test('the card always fits the terminal it was measured against', () => {
     for (const width of [80, 100, 110, 140, 174, 220]) {
-      expect(helpCardWidth(helpStacks(width))).toBeLessThanOrEqual(width)
+      expect(helpMinCardWidth(helpStacks(width))).toBeLessThanOrEqual(width)
+      expect(helpCardWidth(width)).toBeLessThanOrEqual(width)
+      expect(helpCardHeight(width, 52)).toBeLessThanOrEqual(52)
     }
+  })
+
+  // A card the size of its own text reads as a stray line of output, not as a window.
+  test('the card takes most of the window and never less than its keys need', () => {
+    for (const [width, height] of [[174, 52], [140, 44], [110, 46], [80, 46]] as const) {
+      const stacks = helpStacks(width)
+      expect(helpCardWidth(width)).toBeGreaterThanOrEqual(helpContentWidth(stacks))
+      expect(helpCardWidth(width) * 2).toBeGreaterThan(width)
+      expect(helpCardHeight(width, height) * 2).toBeGreaterThan(height)
+    }
+  })
+
+  // A short window cannot hold the list, so the card grows to the window and scrolls.
+  test('a short window gives the whole height to the card', () => {
+    expect(helpCardHeight(69, 30)).toBe(30)
+    expect(helpScrollMax(69, 30)).toBe(helpContentHeight(helpStacks(69)) + 6 - 30)
   })
 
   test('every group lands in exactly one stack', () => {
@@ -119,6 +137,26 @@ describe('the popup on the screen', () => {
     await harness.flush()
     return harness.captureCharFrame()
   }
+
+  // Where the card sits on the screen: the row of its top border, the row of its bottom
+  // border, and the columns of its two corners on the top row.
+  const cardBox = (frame: string): { top: number; bottom: number; left: number; right: number; rows: number } => {
+    const lines = frame.split('\n').filter((line) => line !== '')
+    const top = lines.findIndex((line) => line.includes(' Keys '))
+    const bottom = lines.findIndex((line) => line.includes('Esc closes'))
+    const border = lines[top] ?? ''
+    return { top, bottom, left: border.indexOf('╭'), right: border.lastIndexOf('╮'), rows: lines.length }
+  }
+
+  test('the card sits in the middle of the window, across and down', async () => {
+    for (const [width, height] of [[174, 52], [140, 44], [110, 46], [80, 46]] as const) {
+      const box = cardBox(await frameOf(true, width, height))
+      expect(box.top).toBeGreaterThanOrEqual(0)
+      // An odd gap cannot split evenly, so the two sides may differ by one column or row.
+      expect(Math.abs(box.left - (width - 1 - box.right))).toBeLessThanOrEqual(1)
+      expect(Math.abs(box.top - (box.rows - 1 - box.bottom))).toBeLessThanOrEqual(1)
+    }
+  })
 
   test('the header says which key opens it, and says nothing more', async () => {
     const frame = await frameOf(false)
