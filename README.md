@@ -82,7 +82,9 @@ The card lays itself out for the window it opens in. It sits in the middle of th
 
 The drawer is a text field. `←` / `→` move the caret, `Alt+←` / `Alt+→` jump a word, `Home` / `End` (or `Ctrl+A` / `Ctrl+E`) reach the two ends, and `Backspace` / `Delete` take the character on either side of it.
 
-`Cmd+V` pastes. The terminal, not tweeter, sees that key, so tweeter turns on bracketed paste at startup and turns it off on the way out; the terminal then wraps the clipboard in markers and the whole text arrives as one piece rather than as a run of keystrokes. That matters for more than speed: an unmarked newline arrives as `Enter`, which would send the draft half written. A terminal that will not mark a paste still works, because a run of characters that does not start an escape sequence is read as a paste too. Either way the line breaks become spaces, the trailing one is dropped, and the rest of the control characters come out, since the drawer holds one line.
+`Shift+Enter` starts a new line, and `Enter` keeps sending the draft. A terminal reports the Shift on that key only when it speaks the kitty keyboard protocol, which tweeter asks for at startup; kitty, Ghostty, WezTerm and recent iTerm2 answer it. `Alt+Enter` does the same thing everywhere else, because that press has carried its own escape sequence since long before the protocol. The drawer already wrapped a long draft over several rows, so a break of your own draws like any other row and the caret walks onto it.
+
+`Cmd+V` pastes. The terminal, not tweeter, sees that key, so tweeter turns on bracketed paste at startup and turns it off on the way out; the terminal then wraps the clipboard in markers and the whole text arrives as one piece rather than as a run of keystrokes. That matters for more than speed: an unmarked newline arrives as `Enter`, which would send the draft half written. A terminal that will not mark a paste still works, because a run of characters that does not start an escape sequence is read as a paste too. Either way the line breaks become spaces, the trailing one is dropped, and the rest of the control characters come out; a break you want in the draft is a `Shift+Enter` away.
 
 `y` copies the open tweet's link, `https://x.com/handle/status/id`, to your system clipboard, ready to paste anywhere you share it. A copy leaves nothing on the screen to show for itself, so a green note comes up in the top right corner of the pane, `⧉ link copied`, and goes on its own after about two seconds; the status line keeps the whole link until the next key. A second copy restarts that clock rather than letting the note leave while you are still reading it. When the clipboard command is missing, the note says `⧉ copy failed` and the status line names the reason.
 
@@ -244,6 +246,7 @@ Implemented:
 - `l` to like or unlike the open tweet, drawn as a filled `♥` on the count, applied optimistically and rolled back on refusal
 - `b` to bookmark or unbookmark the open tweet, drawn as a `⚑` on the card, applied the same way
 - `Shift+P` writes a new post of your own, in the same drawer, with no tweet behind it
+- `Shift+Enter` (or `Alt+Enter`) starts a new line in the drawer, while `Enter` still sends
 - `y` copies the open tweet's link to the system clipboard, with a green note in the top right corner of the pane that goes on its own
 - `?` floats a centred key popup over the panes, in three columns that collapse to two and then one on a narrow terminal, and scroll when the window is too short
 - `R` refreshes from the top cursor and prepends what is new, while the older pages page in from the bottom cursor on their own as the selection nears the end

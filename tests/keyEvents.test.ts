@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { isCtrlEnterKey, isEnterKey } from '../src/app/keyEvents.ts'
+import { isCtrlEnterKey, isEnterKey, isNewlineKey } from '../src/app/keyEvents.ts'
 
 describe('key event helpers', () => {
   test('recognizes OpenTUI enter aliases', () => {
@@ -15,5 +15,17 @@ describe('key event helpers', () => {
     expect(isCtrlEnterKey({ name: 'j', ctrl: true })).toBe(true)
     expect(isCtrlEnterKey({ name: 'm', ctrl: true })).toBe(true)
     expect(isCtrlEnterKey({ name: 'unknown', ctrl: true, sequence: '\n' })).toBe(true)
+  })
+
+  test('reads shift enter and alt enter as a new line', () => {
+    expect(isNewlineKey({ name: 'return', ctrl: false, shift: true })).toBe(true)
+    expect(isNewlineKey({ name: 'enter', ctrl: false, shift: true })).toBe(true)
+    expect(isNewlineKey({ name: 'kpenter', ctrl: false, meta: true })).toBe(true)
+  })
+
+  test('keeps plain enter and ctrl enter for sending', () => {
+    expect(isNewlineKey({ name: 'return', ctrl: false })).toBe(false)
+    expect(isNewlineKey({ name: 'return', ctrl: true, shift: true })).toBe(false)
+    expect(isNewlineKey({ name: 'j', ctrl: false, shift: true })).toBe(false)
   })
 })

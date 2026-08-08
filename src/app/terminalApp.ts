@@ -9,7 +9,7 @@ import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './ma
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
-import { caretMoveFor, cleanPasted, helpScrollStep, isCtrlEnterKey, isEnterKey, isHelpKey, isTextInput, pastedText } from './keyEvents.ts'
+import { caretMoveFor, cleanPasted, helpScrollStep, isCtrlEnterKey, isEnterKey, isHelpKey, isNewlineKey, isTextInput, pastedText } from './keyEvents.ts'
 import { createImageLayer, writeToTerminal, type ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize } from '../media/geometry.ts'
 import { detectImageRenderer } from '../media/detect.ts'
@@ -536,6 +536,11 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
       // The drawer is a text field while it is open, so it answers every key itself.
       if (state.composer.open) {
+        if (isNewlineKey(key)) {
+          state = insertIntoDraft(state, '\n')
+          rerender()
+          return
+        }
         if (isCtrlEnterKey(key) || isEnterKey(key)) {
           void sendComposer()
           return

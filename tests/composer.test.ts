@@ -122,6 +122,13 @@ describe('editing the draft', () => {
     expect(draftOf(insertIntoDraft(withDraft('', 0), 'pasted'))).toEqual(['pasted', 6])
   })
 
+  test('a new line breaks the draft in two and moves the caret past the break', () => {
+    const state = insertIntoDraft(withDraft('ab', 2), '\n')
+    expect(draftOf(state)).toEqual(['ab\n', 3])
+    const drawer = composerBody(insertIntoDraft(state, 'cd').composer.draft, undefined, 20)
+    expect(drawer.text.split('\n')).toEqual(['ab', 'cd'])
+  })
+
   test('backspace takes the character behind the caret and delete the one in front', () => {
     expect(draftOf(deleteFromDraft(withDraft('hello', 3), -1))).toEqual(['helo', 2])
     expect(draftOf(deleteFromDraft(withDraft('hello', 3), 1))).toEqual(['helo', 3])

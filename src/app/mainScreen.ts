@@ -372,6 +372,7 @@ export const helpGroups: readonly HelpGroup[] = [
     title: 'Write a reply or a quote',
     entries: [
       { keys: 'Enter', what: 'send' },
+      { keys: 'Shift+Enter', what: 'start a new line' },
       { keys: 'Esc', what: 'close and keep the draft' },
       { keys: 'Cmd+V', what: 'paste the clipboard' },
       { keys: '← / →', what: 'move the caret' },

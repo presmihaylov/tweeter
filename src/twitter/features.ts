@@ -71,6 +71,38 @@ export const buildTimelineFeatures = (): FeatureMap => ({
 
 export const buildHomeTimelineFeatures = (): FeatureMap => buildTimelineFeatures()
 
+// A profile read declares its own set, and X refuses the call when one of them is missing.
+// These are the exact switches the x.com bundle names for UserByRestId.
+export const buildUserFeatures = (): FeatureMap => ({
+  hidden_profile_subscriptions_enabled: true,
+  profile_label_improvements_pcf_label_in_post_enabled: true,
+  responsive_web_profile_redirect_enabled: true,
+  rweb_tipjar_consumption_enabled: true,
+  verified_phone_label_enabled: false,
+  highlights_tweets_tab_ui_enabled: true,
+  responsive_web_twitter_article_notes_tab_enabled: true,
+  subscriptions_feature_can_gift_premium: true,
+  creator_subscriptions_tweet_preview_api_enabled: true,
+  responsive_web_graphql_timeline_navigation_enabled: true
+})
+
+export const buildUserFieldToggles = (): FeatureMap => ({
+  withPayments: false,
+  withAuxiliaryUserLabels: false
+})
+
+// The same, for the profile timeline. It asks for six switches the home timeline does not,
+// so it carries its own set rather than sharing that one.
+export const buildUserTweetsFeatures = (): FeatureMap => ({
+  ...buildTimelineFeatures(),
+  rweb_cashtags_enabled: true,
+  rweb_cashtags_composer_attachment_enabled: true,
+  rweb_conversational_replies_downvote_enabled: false,
+  content_disclosure_indicator_enabled: true,
+  content_disclosure_ai_generated_indicator_enabled: true,
+  responsive_web_grok_analyze_post_followups_enabled: false
+})
+
 // CreateTweet declares its own feature set and rejects a request that omits one it needs.
 // This is the exact set the write path was verified against, so it is kept separate from
 // the read features, which change on their own schedule.

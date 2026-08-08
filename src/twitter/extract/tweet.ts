@@ -185,6 +185,40 @@ export const getHomeInstructions = (result: unknown): unknown[] => {
   return getTimelineInstructions(result)
 }
 
+// A profile timeline hangs its instructions under the user, and X has moved them between
+// two names, so both are read. The entries themselves are the shape every timeline uses.
+export const getUserTimelineInstructions = (result: unknown): unknown[] => {
+  const user = getMap(getMap(getMap(result, 'data'), 'user'), 'result')
+  const v2 = getSlice(getMap(getMap(user, 'timeline_v2'), 'timeline'), 'instructions')
+  if (v2) {
+    return v2
+  }
+  return getSlice(getMap(getMap(user, 'timeline'), 'timeline'), 'instructions') ?? []
+}
+
+// Every tweet on a profile page counts, including the ones X packs into a self-thread
+// module, so this keeps what the home parser drops: there each module is one card, here
+// each item is a post the account wrote.
+export const parseUserTweets = (instructions: unknown[]): AppTweet[] => {
+  const seen = new Set<string>()
+  const tweets: AppTweet[] = []
+  for (const instruction of instructions) {
+    for (const entry of getSlice(instruction, 'entries') ?? []) {
+      if (isAdEntryId(getStr(entry, 'entryId'))) {
+        continue
+      }
+      for (const result of collectTweetResultsFromEntry(entry, (itemId) => !isAdEntryId(itemId))) {
+        const tweet = mapTweetResult(result, 0)
+        if (tweet && !seen.has(tweet.id)) {
+          seen.add(tweet.id)
+          tweets.push(tweet)
+        }
+      }
+    }
+  }
+  return tweets
+}
+
 export const getTweetDetailInstructions = (result: unknown): unknown[] => {
   const data = getMap(result, 'data')
   const tweetResultInstructions = getSlice(getMap(getMap(getMap(data, 'tweetResult'), 'result'), 'timeline'), 'instructions')

@@ -87,6 +87,15 @@ export const helpScrollStep = (key: AppKey): number => {
   return key.name === 'pageup' ? -10 : 0
 }
 
+// Enter sends the draft, so a line break needs its own press. A terminal that speaks the
+// kitty keyboard protocol marks the Shift; one that does not can send Alt+Enter instead.
+export const isNewlineKey = (key: AppKey): boolean => {
+  if (key.ctrl) {
+    return false
+  }
+  return (key.shift === true || key.meta === true) && enterNames.has(key.name)
+}
+
 export const isCtrlEnterKey = (key: AppKey): boolean => {
   if (key.ctrl && enterNames.has(key.name)) {
     return true

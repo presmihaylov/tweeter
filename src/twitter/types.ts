@@ -48,6 +48,17 @@ export type TimelinePage = {
   bottomCursor?: string
 }
 
+// The account behind the cookies, as its profile page reports it. X gives the follower
+// count for right now and keeps no history of it, so the app samples it day by day.
+export type AppProfile = {
+  id: string
+  handle: string
+  name: string
+  followers: number
+  following: number
+  posts: number
+}
+
 export type TweetBundle = {
   tweet: AppTweet
   related: AppTweet[]

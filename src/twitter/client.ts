@@ -1,13 +1,13 @@
 import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, notBookmarkedCode, notificationParams, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
-import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildTweetDetailFeatures } from './features.ts'
+import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildTweetDetailFeatures, buildUserFeatures, buildUserFieldToggles, buildUserTweetsFeatures } from './features.ts'
 import { GraphQLClient } from './graphql.ts'
 import { HeaderBuilder } from './headers.ts'
 import { PageContextStore } from './pageContext.ts'
 import { QueryIdStore } from './queryIds.ts'
 import { generateTransactionId } from './transactionId.ts'
 import { statusUrl } from './urls.ts'
-import type { AuthStatus, BadgeCounts, ConversationPage, DeleteResult, LikeResult, NotificationPage, PostResult, TimelinePage, TweetBundle, TwitterClientOptions, WriteRetryNotice } from './types.ts'
-import { extractCursorFromInstructions, getHomeInstructions, getTweetDetailInstructions, parseConversationTweets, parseHomeTweets, parseNotificationsPage } from './extract/index.ts'
+import type { AppProfile, AuthStatus, BadgeCounts, ConversationPage, DeleteResult, LikeResult, NotificationPage, PostResult, TimelinePage, TweetBundle, TwitterClientOptions, WriteRetryNotice } from './types.ts'
+import { extractCursorFromInstructions, getHomeInstructions, getTweetDetailInstructions, getUserTimelineInstructions, parseConversationTweets, parseHomeTweets, parseNotificationsPage, parseUserTweets } from './extract/index.ts'
 import { getInt, getMap, getSlice, getStr, isRecord } from '../utils/guards.ts'
 import type { Fetcher } from '../utils/fetcher.ts'
 import { defaultFetcher } from '../utils/fetcher.ts'
@@ -126,6 +126,43 @@ export class TwitterClient {
     const instructions = getHomeInstructions(body)
     return {
       tweets: parseHomeTweets(instructions),
+      topCursor: extractCursorFromInstructions(instructions, 'Top'),
+      bottomCursor: extractCursorFromInstructions(instructions, 'Bottom')
+    }
+  }
+
+  // Who the cookies belong to, and how many followers that account has right now.
+  async loadProfile(args: { userId: string }): Promise<AppProfile> {
+    const { body } = await this.withQueryIdRetry('UserByRestId', [], async (queryId) => {
+      return this.gql.get('UserByRestId', queryId, { userId: args.userId, withSafetyModeUserFields: true }, buildUserFeatures(), buildUserFieldToggles())
+    })
+    const profile = parseProfile(body)
+    if (!profile) {
+      await this.debugLogger?.log('twitter.profile.unreadable', { body: safeJsonSnippet(body) })
+      throw new Error('X did not name the account behind these cookies')
+    }
+    return profile
+  }
+
+  // The profile timeline, posts and replies alike, which is what the stats page counts.
+  async loadUserTweetsPage(args: { userId: string; count: number; cursor?: string }): Promise<TimelinePage> {
+    const variables: Record<string, unknown> = {
+      userId: args.userId,
+      count: args.count,
+      includePromotedContent: false,
+      withCommunity: true,
+      withVoice: true,
+      withV2Timeline: true
+    }
+    if (args.cursor) {
+      variables.cursor = args.cursor
+    }
+    const { body } = await this.withQueryIdRetry('UserTweetsAndReplies', [], async (queryId) => {
+      return this.gql.get('UserTweetsAndReplies', queryId, variables, buildUserTweetsFeatures())
+    })
+    const instructions = getUserTimelineInstructions(body)
+    return {
+      tweets: parseUserTweets(instructions),
       topCursor: extractCursorFromInstructions(instructions, 'Top'),
       bottomCursor: extractCursorFromInstructions(instructions, 'Bottom')
     }
@@ -441,6 +478,37 @@ const parseCurrentUser = (text: string): AuthStatus => {
     }
   }
   return { ok: false, error: 'no user in response' }
+}
+
+// X has moved the handle and the name out of legacy and into core, and older sessions still
+// answer the old way, so both are read before the profile is called unreadable.
+const parseProfile = (body: unknown): AppProfile | undefined => {
+  const result = getMap(getMap(getMap(body, 'data'), 'user'), 'result')
+  const legacy = getMap(result, 'legacy')
+  const core = getMap(result, 'core')
+  const handle = getStr(core, 'screen_name') || getStr(legacy, 'screen_name')
+  const id = getStr(result, 'rest_id')
+  if (handle === '' || id === '') {
+    return undefined
+  }
+  return {
+    id,
+    handle,
+    name: getStr(core, 'name') || getStr(legacy, 'name') || handle,
+    followers: getInt(legacy, 'followers_count'),
+    following: getInt(legacy, 'friends_count'),
+    posts: getInt(legacy, 'statuses_count')
+  }
+}
+
+// The one place a cookie session still names its own account without a request: x.com writes
+// the signed-in user id into twid as `u=<id>`, url-encoded.
+export const userIdFromCookies = (cookieHeader: string): string | undefined => {
+  const raw = /twid=([^;]+)/.exec(cookieHeader)?.[1]
+  if (raw === undefined) {
+    return undefined
+  }
+  return /u=?(\d+)/.exec(decodeURIComponent(raw))?.[1]
 }
 
 const tryParseJson = (text: string): unknown => {
