@@ -3,7 +3,7 @@ import { createTestRenderer } from '@opentui/core/testing'
 import { TwitterClient } from '../src/twitter/client.ts'
 import { parseNotificationsPage } from '../src/twitter/extract/notifications.ts'
 import { parseLegacyTweets } from '../src/twitter/extract/legacyTweet.ts'
-import { createMainScreen, feedName, headerLine, noticeGlyph, noticeHint, notificationsTitle, railTabs } from '../src/app/mainScreen.ts'
+import { createMainScreen, headerLine, noticeGlyph, noticeHint, notificationsTitle, railTabs, tabName } from '../src/app/mainScreen.ts'
 import { nextTab, notificationLoadResult } from '../src/app/terminalApp.ts'
 import {
   collapseNotice,
@@ -364,13 +364,14 @@ describe('the posts behind a notice line', () => {
 
 describe('what the screen says about the tab', () => {
   test('Tab walks the three tabs and wraps', () => {
-    expect(nextTab('following')).toBe('forYou')
-    expect(nextTab('forYou')).toBe('notifications')
-    expect(nextTab('notifications')).toBe('following')
+    const state = initialAppState()
+    expect(nextTab(state)).toBe('forYou')
+    expect(nextTab({ ...state, activeTab: 'forYou' })).toBe('notifications')
+    expect(nextTab({ ...state, activeTab: 'notifications' })).toBe('following')
   })
 
   test('each tab has a name, and the rail marks the open one', () => {
-    expect(feedName('notifications')).toBe('Notifications')
+    expect(tabName(initialAppState(), 'notifications')).toBe('Notifications')
     expect(railTabs(loaded())).toContain('● Notifications')
     expect(railTabs(initialAppState())).toContain('○ Notifications')
   })

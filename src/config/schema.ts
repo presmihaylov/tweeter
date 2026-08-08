@@ -24,7 +24,10 @@ export const tweeterConfigSchema = z.object({
   profiles: z.record(z.string(), profileSchema),
   ui: z.object({
     defaultFeed: z.enum(['following', 'forYou']).optional(),
-    imageRenderer: z.enum(['auto', 'chafa', 'kitty', 'none']).optional()
+    imageRenderer: z.enum(['auto', 'chafa', 'kitty', 'none']).optional(),
+    // The searches the reader made tabs of, in the order the rail lists them. A tab is worth
+    // keeping across runs: the reader closes it when the subject stops being interesting.
+    searchTabs: z.array(z.string().min(1)).optional()
   }).optional()
 })
 

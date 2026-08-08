@@ -1,10 +1,10 @@
 import { CliRenderEvents, createCliRenderer, decodePasteBytes } from '@opentui/core'
-import type { AppMedia, AppProfile, AppTweet, AuthStatus, NotificationRow, PostResult, WriteRetryNotice } from '../twitter/types.ts'
+import type { AppMedia, AppProfile, AppTweet, AuthStatus, NotificationRow, PostResult, TimelinePage, WriteRetryNotice } from '../twitter/types.ts'
 import { TwitterClient, userIdFromCookies } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { applyBookmark, applyLike, beginConversationLoad, beginStatsLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, closeStats, clearToast, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, failStatsLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeStats, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, repliesOpen, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, scrollStats, selectRelativeTweet, setFeedSort, showToast, toggleHelp, toggleLightbox, toggleReplies, toggleStats, turnStatsWindow, videoOf, type AppState, type ComposerMode, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
+import { addSearchTab, applyBookmark, applyLike, beginConversationLoad, beginStatsLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, closeStats, clearToast, collapseNotice, deleteFromDraft, emptyTimeline, enterSelection, expandNotice, failConversationLoad, failStatsLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, isSearchTab, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeStats, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, removeSearchTab, repliesOpen, searchQueryOf, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, scrollStats, selectRelativeTweet, setFeedSort, showToast, tabOrder, toggleHelp, toggleLightbox, toggleReplies, toggleStats, turnStatsWindow, videoOf, type AppState, type TabId, type TimelineId, type TimelineState, type WriteMode } from '../state/store.ts'
 import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
@@ -27,12 +27,12 @@ export const toastLife = 2200
 
 export const copyMark = '⧉'
 
-export const cursorFor = (timeline: TimelineState, mode: FeedLoad): string | undefined => {
+export const cursorFor = (timeline: TimelineState | undefined, mode: FeedLoad): string | undefined => {
   if (mode === 'newer') {
-    return timeline.topCursor
+    return timeline?.topCursor
   }
   if (mode === 'older') {
-    return timeline.bottomCursor
+    return timeline?.bottomCursor
   }
   return undefined
 }
@@ -68,7 +68,7 @@ export const notificationLoadResult = (mode: FeedLoad, added: number): string =>
 }
 
 // What the drawer calls the draft, in the status line and in a failure.
-export const composerWhat = (mode: ComposerMode): string => {
+export const composerWhat = (mode: WriteMode): string => {
   if (mode === 'post') {
     return 'post'
   }
@@ -84,7 +84,7 @@ export type DraftSender = {
 
 // The mode picks the call. A new post carries no tweet, and the drawer refuses to send a
 // reply or a quote whose tweet it lost, so a missing target here can only be a new post.
-export const sendDraft = (args: { client: DraftSender; mode: ComposerMode; target?: AppTweet; text: string; onRetry: (notice: WriteRetryNotice) => void }): Promise<PostResult> => {
+export const sendDraft = (args: { client: DraftSender; mode: WriteMode; target?: AppTweet; text: string; onRetry: (notice: WriteRetryNotice) => void }): Promise<PostResult> => {
   const { client, mode, target, text, onRetry } = args
   if (mode === 'post' || target === undefined) {
     return client.postTweet({ text, onRetry })
@@ -95,12 +95,11 @@ export const sendDraft = (args: { client: DraftSender; mode: ComposerMode; targe
   return client.replyToTweet({ tweetId: target.id, text, onRetry })
 }
 
-// Tab walks the three tabs in the order the rail lists them, and wraps at the end.
-export const nextTab = (tab: TabId): TabId => {
-  if (tab === 'following') {
-    return 'forYou'
-  }
-  return tab === 'forYou' ? 'notifications' : 'following'
+// Tab walks the tabs in the order the rail lists them, and wraps at the end.
+export const nextTab = (state: AppState): TabId => {
+  const order = tabOrder(state)
+  const at = order.indexOf(state.activeTab)
+  return order[(at + 1) % order.length] ?? 'following'
 }
 
 // ← walks back out one step at a time: it shuts the reply list first, because the header
@@ -148,6 +147,12 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
 
   const startAuthenticated = async (config: TweeterConfig, profileName: string, profile: TweeterProfile): Promise<void> => {
     let state: AppState = initialAppState()
+    // The tabs from the last run come back empty. The first Tab onto one fetches it, the way
+    // the two feeds behave.
+    for (const query of config.ui?.searchTabs ?? []) {
+      state = addSearchTab(state, query)
+    }
+    const configStore = new ConfigStore()
     const session: { auth?: AuthStatus } = {}
 
     // A tweet holds up to four pictures, so the index says which tile the reader clicked.
@@ -347,30 +352,97 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       await loadStats()
     }
 
-    const loadFeed = async (feed: FeedId, mode: FeedLoad): Promise<void> => {
-      const before = state.timelines[feed].tweetIds.length
-      state = { ...state, activeTab: feed, timelines: { ...state.timelines, [feed]: { ...state.timelines[feed], loading: true, error: undefined } }, status: feedLoadStatus(mode) }
+    // A search tab runs the query again rather than follow a cursor forward: X answers
+    // "Latest" newest first, so page one already holds whatever arrived since.
+    const timelinePage = async (feed: TimelineId, mode: FeedLoad): Promise<TimelinePage> => {
+      const query = searchQueryOf(state, feed)
+      if (query !== undefined) {
+        return client.loadSearchPage({ query, count: 40, cursor: mode === 'older' ? state.timelines[feed]?.bottomCursor : undefined })
+      }
+      return client.loadHomeTimelinePage({
+        count: 40,
+        following: feed === 'following',
+        ranked: state.feedSort === 'popular',
+        cursor: cursorFor(state.timelines[feed], mode)
+      })
+    }
+
+    const loadFeed = async (feed: TimelineId, mode: FeedLoad): Promise<void> => {
+      const before = state.timelines[feed]?.tweetIds.length ?? 0
+      const opening = state.timelines[feed] ?? emptyTimeline(feed)
+      state = { ...state, activeTab: feed, timelines: { ...state.timelines, [feed]: { ...opening, loading: true, error: undefined } }, status: feedLoadStatus(mode) }
       rerender()
       try {
-        const page = await client.loadHomeTimelinePage({
-          count: 40,
-          following: feed === 'following',
-          ranked: state.feedSort === 'popular',
-          cursor: cursorFor(state.timelines[feed], mode)
-        })
+        const page = await timelinePage(feed, mode)
         state = mergeTimelinePage(state, feed, page.tweets, page, mode === 'newer' ? 'top' : 'bottom')
-        const added = state.timelines[feed].tweetIds.length - before
+        const added = (state.timelines[feed]?.tweetIds.length ?? 0) - before
         // New tweets sit above the selection, where the reader cannot see them, so a
         // refresh that found some also moves the cursor up to them.
-        const top = state.timelines[feed].tweetIds[0]
+        const top = state.timelines[feed]?.tweetIds[0]
         if (mode === 'newer' && added > 0 && top !== undefined) {
           state = { ...state, selectedTweetId: top, detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false }
         }
         state = { ...state, status: feedLoadResult(mode, added) }
       } catch (error) {
-        state = { ...state, status: 'feed error', timelines: { ...state.timelines, [feed]: { ...state.timelines[feed], loading: false, error: errorMessage(error) } } }
+        const failed = state.timelines[feed] ?? emptyTimeline(feed)
+        state = { ...state, status: 'feed error', timelines: { ...state.timelines, [feed]: { ...failed, loading: false, error: errorMessage(error) } } }
       }
       rerender()
+    }
+
+    // A tab the reader already opened keeps what it holds and keeps its place, so switching
+    // only fetches the first page of a tab that holds nothing yet.
+    const openTab = async (next: TabId): Promise<void> => {
+      if (next === 'notifications') {
+        if (state.notifications.rows.length === 0) {
+          await loadNotifications('initial')
+          return
+        }
+        state = { ...state, activeTab: next, detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false, status: 'switched to notifications' }
+        rerender()
+        return
+      }
+      const tweetIds = state.timelines[next]?.tweetIds ?? []
+      if (tweetIds.length === 0) {
+        await loadFeed(next, 'initial')
+        return
+      }
+      state = { ...state, activeTab: next, selectedTweetId: tweetIds[0], detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false, status: 'switched feed' }
+      rerender()
+    }
+
+    // The tabs outlive the run, so every change to the list is written back. A file that
+    // cannot be written costs the reader nothing this run, so it only reaches the log.
+    const rememberSearchTabs = async (): Promise<void> => {
+      try {
+        await configStore.setSearchTabs(state.searchTabs.map((entry) => entry.query))
+      } catch (error) {
+        await debugLogger.log('ui.searchTabs.save.failed', { error: errorMessage(error) })
+      }
+    }
+
+    // Enter in the search prompt. A query already open wins its tab back, so the fetch only
+    // runs for a tab that holds nothing yet.
+    const openSearchTab = (query: string): void => {
+      state = addSearchTab(closeComposer(state, 'searching'), query)
+      rerender()
+      void rememberSearchTabs()
+      const tab = state.activeTab
+      if (tab !== 'notifications' && (state.timelines[tab]?.tweetIds.length ?? 0) === 0) {
+        void loadFeed(tab, 'initial')
+      }
+    }
+
+    const closeSearchTab = (): void => {
+      const tab = state.activeTab
+      if (!isSearchTab(tab)) {
+        state = { ...state, status: 'only a tab you added can be closed' }
+        rerender()
+        return
+      }
+      state = removeSearchTab(state, tab)
+      rerender()
+      void rememberSearchTabs()
     }
 
     // The notifications tab is the old REST API, so it gets its own loader. The cursors, the
@@ -535,8 +607,14 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       const targetId = state.composer.targetTweetId
       const target = targetId ? state.tweets[targetId] : undefined
       const mode = state.composer.mode
-      const what = composerWhat(mode)
       const text = state.composer.draft.trim()
+      // The search prompt shares the drawer, so Enter there makes a tab instead of a write.
+      // Splitting it off here is what keeps the write path unable to post a query.
+      if (mode === 'search') {
+        openSearchTab(text)
+        return
+      }
+      const what = composerWhat(mode)
       // A new post answers no tweet, so it is the one mode that needs no target.
       if ((!target && mode !== 'post') || text === '') {
         return
@@ -761,24 +839,18 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         return
       }
       if (key.name === 'tab') {
-        const next = nextTab(state.activeTab)
-        // A tab the reader already opened keeps what it holds and keeps its place, so Tab
-        // only fetches the first page of a tab that holds nothing yet.
-        if (next === 'notifications') {
-          if (state.notifications.rows.length > 0) {
-            state = { ...state, activeTab: next, detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false, status: 'switched to notifications' }
-            rerender()
-            return
-          }
-          void loadNotifications('initial')
-          return
-        }
-        if (state.timelines[next].tweetIds.length > 0) {
-          state = { ...state, activeTab: next, selectedTweetId: state.timelines[next].tweetIds[0], detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false, status: 'switched feed' }
-          rerender()
-          return
-        }
-        void loadFeed(next, 'initial')
+        void openTab(nextTab(state))
+        return
+      }
+      // The reader makes a tab by typing a search into the drawer, and closes it again with
+      // Shift+D. The three fixed tabs stay whatever the reader does.
+      if (key.name === '/') {
+        state = openComposer(state, 'search')
+        rerender()
+        return
+      }
+      if (key.name === 'D' || (key.shift && key.name === 'd')) {
+        closeSearchTab()
         return
       }
       // Only the Following feed carries a sort. On the other tabs the key would silently do

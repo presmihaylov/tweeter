@@ -4,17 +4,29 @@ import { nextStatsWindow } from '../stats/aggregate.ts'
 
 export type FeedId = 'following' | 'forYou'
 
-// Notifications are a third tab but not a third feed: they hold rows, and a row is either a
-// tweet or an aggregated line. Keeping the two apart lets the type checker prove that every
-// place which needs a timeline still names one of the two tweet feeds.
-export type TabId = FeedId | 'notifications'
+// A tab the reader made, which holds one search. The prefix keeps such an id apart from the
+// fixed ones, so a search for "following" can never stand in for the feed of that name.
+export type SearchTabId = `search:${string}`
+
+// Every tab that holds a timeline: the two feeds, and each search the reader added.
+export type TimelineId = FeedId | SearchTabId
+
+// Notifications are a tab but not a timeline: they hold rows, and a row is either a tweet or
+// an aggregated line. Keeping the two apart lets the type checker prove that every place
+// which needs a timeline still names one of the timeline tabs.
+export type TabId = TimelineId | 'notifications'
+
+export const isSearchTab = (tab: TabId): tab is SearchTabId => tab.startsWith('search:')
+
+// The query as the reader typed it, under the id the tabs are keyed by.
+export type SearchTab = { id: SearchTabId; query: string }
 
 // What x.com calls "Sort by" on the Following tab. Recent is what X gives a client that
 // asks for nothing, so it stays the default here too.
 export type FeedSort = 'recent' | 'popular'
 
 export type TimelineState = {
-  id: FeedId
+  id: TimelineId
   tweetIds: string[]
   topCursor?: string
   bottomCursor?: string
@@ -59,9 +71,13 @@ export type StatsState = {
   scroll: number
 }
 
-// Both writes are a draft against the tweet the reader is on, so one drawer serves both.
-// A reply answers that tweet; a quote reposts it with the draft on top.
-export type ComposerMode = 'reply' | 'quote' | 'post'
+// The three modes that send the draft to X. A reply answers the tweet the reader is on, a
+// quote reposts it with the draft on top, and a post answers nothing.
+export type WriteMode = 'reply' | 'quote' | 'post'
+
+// The drawer is the one text field in the app, so the search prompt borrows it rather than
+// grow a second one. Its mode never reaches the write path: it makes a tab instead.
+export type ComposerMode = WriteMode | 'search'
 
 // Where the next character lands, counted in characters from the start of the draft. The
 // drawer is a text field, so a keystroke acts here and not at the end of the draft.
@@ -71,7 +87,9 @@ export type AppState = {
   tweets: Record<string, AppTweet>
   activeTab: TabId
   feedSort: FeedSort
-  timelines: Record<FeedId, TimelineState>
+  timelines: Record<TimelineId, TimelineState>
+  // The tabs the reader added, in the order the rail lists them, after the fixed three.
+  searchTabs: SearchTab[]
   notifications: NotificationsState
   conversations: Record<string, ConversationState>
   selectedTweetId?: string
@@ -118,6 +136,7 @@ export const initialAppState = (): AppState => ({
     following: { id: 'following', tweetIds: [], loading: false },
     forYou: { id: 'forYou', tweetIds: [], loading: false }
   },
+  searchTabs: [],
   notifications: { rows: [], loading: false, unread: 0 },
   conversations: {},
   composer: { open: false, mode: 'reply', draft: '', caret: 0, sending: false },
@@ -248,9 +267,11 @@ export const applyBookmark = (state: AppState, tweetId: string, bookmarked: bool
 // ways: the top one asks for what arrived since, the bottom one asks for the next page down.
 export type PagePlacement = 'top' | 'bottom'
 
-export const mergeTimelinePage = (state: AppState, feed: FeedId, tweets: AppTweet[], cursors: { topCursor?: string; bottomCursor?: string }, placement: PagePlacement = 'bottom'): AppState => {
+export const emptyTimeline = (id: TimelineId): TimelineState => ({ id, tweetIds: [], loading: false })
+
+export const mergeTimelinePage = (state: AppState, feed: TimelineId, tweets: AppTweet[], cursors: { topCursor?: string; bottomCursor?: string }, placement: PagePlacement = 'bottom'): AppState => {
   const merged = mergeTweets(state, tweets)
-  const existing = merged.timelines[feed]
+  const existing = merged.timelines[feed] ?? emptyTimeline(feed)
   const seen = new Set(existing.tweetIds)
   const fresh: string[] = []
   for (const tweet of tweets) {
@@ -354,6 +375,71 @@ export const selectRelativeRow = (state: AppState, delta: number): AppState => {
   return { ...state, selectedRowKey: rows[nextIndex]?.key, lightbox: undefined, detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false, status }
 }
 
+// The id is the query itself, folded to one case and stripped of its edges, so asking twice
+// for the same words lands on the tab that is already open rather than making a second one.
+export const searchTabIdOf = (query: string): SearchTabId => `search:${query.trim().toLowerCase()}`
+
+export const searchQueryOf = (state: AppState, tab: TabId): string | undefined =>
+  state.searchTabs.find((entry) => entry.id === tab)?.query
+
+// The order the rail lists them and Tab walks them: the three fixed tabs, then the ones the
+// reader added, oldest first.
+export const tabOrder = (state: AppState): TabId[] =>
+  ['following', 'forYou', 'notifications', ...state.searchTabs.map((entry) => entry.id)]
+
+// A query that is already a tab wins its tab back instead of opening a second one. The new
+// tab starts empty, so the caller fetches its first page.
+export const addSearchTab = (state: AppState, query: string): AppState => {
+  const trimmed = query.trim()
+  if (trimmed === '') {
+    return state
+  }
+  const id = searchTabIdOf(trimmed)
+  const opened = { ...state, activeTab: id, selectedTweetId: state.timelines[id]?.tweetIds[0], detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false }
+  if (state.searchTabs.some((entry) => entry.id === id)) {
+    return { ...opened, status: `back on ${trimmed}` }
+  }
+  return {
+    ...opened,
+    searchTabs: [...state.searchTabs, { id, query: trimmed }],
+    timelines: { ...state.timelines, [id]: emptyTimeline(id) },
+    status: `searching ${trimmed}`
+  }
+}
+
+// The tweets the tab held stay in the store, because other tabs may draw the same ones. What
+// goes is the tab, its list and the cursor, and the reader lands on the tab before it.
+export const removeSearchTab = (state: AppState, id: SearchTabId): AppState => {
+  const going = state.searchTabs.findIndex((entry) => entry.id === id)
+  if (going < 0) {
+    return state
+  }
+  const searchTabs = state.searchTabs.filter((entry) => entry.id !== id)
+  // Rebuilt from the tabs that remain, so the list the tab held goes with it.
+  const timelines: Record<TimelineId, TimelineState> = { following: state.timelines.following, forYou: state.timelines.forYou }
+  for (const entry of searchTabs) {
+    const kept = state.timelines[entry.id]
+    if (kept) {
+      timelines[entry.id] = kept
+    }
+  }
+  const order = tabOrder(state)
+  const before = order[order.indexOf(id) - 1] ?? 'following'
+  const activeTab = state.activeTab === id ? before : state.activeTab
+  return {
+    ...state,
+    searchTabs,
+    timelines,
+    activeTab,
+    selectedTweetId: activeTab === 'notifications' ? undefined : timelines[activeTab]?.tweetIds[0],
+    detailStack: [],
+    selectedDetailId: undefined,
+    repliesOpenFor: undefined,
+    textFocused: false,
+    status: `closed ${state.searchTabs[going]?.query ?? 'the tab'}`
+  }
+}
+
 // A sort change makes the loaded page and its cursor stale: the cursor indexes the old
 // order, so paging on with it would interleave two sorts. Empty the feed and let the
 // caller load page one again.
@@ -428,13 +514,13 @@ export const mergeFocalTweet = (state: AppState, focal: AppTweet): AppState => {
 // The drawer writes against the open tweet, not the timeline cursor, so a quote of a
 // drilled-in tweet quotes that tweet.
 export const openComposer = (state: AppState, mode: ComposerMode): AppState => {
-  // A new post answers no tweet, so the drawer opens with nothing behind it and the feed
-  // selection stays where it was.
-  if (mode === 'post') {
+  // A new post answers no tweet, and neither does a search, so the drawer opens with nothing
+  // behind it and the feed selection stays where it was.
+  if (mode === 'post' || mode === 'search') {
     return {
       ...state,
       composer: { open: true, mode, targetTweetId: undefined, draft: '', caret: 0, sending: false },
-      status: 'writing a new post'
+      status: mode === 'search' ? 'type a search' : 'writing a new post'
     }
   }
   const target = focusedTweet(state)

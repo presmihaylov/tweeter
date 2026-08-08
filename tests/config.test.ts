@@ -77,6 +77,28 @@ describe('config', () => {
     })).rejects.toThrow('profile not found')
   })
 
+  test('setSearchTabs keeps the tabs, in order, next to the other ui settings', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tweeter-config-'))
+    const path = join(dir, 'config.json')
+    const store = new ConfigStore(path)
+    await store.upsertProfile('default', { authToken: 'auth', ct0: 'csrf' })
+    await store.save({ ...await store.load(), ui: { defaultFeed: 'forYou' } })
+    await store.setSearchTabs(['claude code', 'opentui'])
+    const raw = JSON.parse(await readFile(path, 'utf8')) as { ui?: { defaultFeed?: string; searchTabs?: string[] } }
+    expect(raw.ui?.searchTabs).toEqual(['claude code', 'opentui'])
+    expect(raw.ui?.defaultFeed).toBe('forYou')
+  })
+
+  test('setSearchTabs with nothing left writes an empty list', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tweeter-config-'))
+    const path = join(dir, 'config.json')
+    const store = new ConfigStore(path)
+    await store.upsertProfile('default', { authToken: 'auth', ct0: 'csrf' })
+    await store.setSearchTabs(['claude code'])
+    await store.setSearchTabs([])
+    expect((await store.load()).ui?.searchTabs).toEqual([])
+  })
+
   test('upsertProfile preserves existing xApi tokens', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'tweeter-config-'))
     const path = join(dir, 'config.json')

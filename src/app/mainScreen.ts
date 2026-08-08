@@ -1,5 +1,5 @@
 import { BoxRenderable, CliRenderEvents, TextRenderable, type CliRenderer, type Renderable } from '@opentui/core'
-import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, repliesOpen, replyIdsOf, type AppState, type ComposerMode, type ConversationState, type FeedSort, type NotificationsState, type TabId } from '../state/store.ts'
+import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, repliesOpen, replyIdsOf, searchQueryOf, tabOrder, type AppState, type ComposerMode, type ConversationState, type FeedSort, type NotificationsState, type TabId, type TimelineId } from '../state/store.ts'
 import type { AppMedia, AppNotice, AppTweet, AuthStatus, NoticeIcon, NotificationRow, WriteRetryNotice } from '../twitter/types.ts'
 import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
@@ -344,7 +344,9 @@ export const helpGroups: readonly HelpGroup[] = [
     title: 'Move around',
     entries: [
       { keys: 'j / k', what: 'walk the feed' },
-      { keys: 'Tab', what: 'Following, For You, Notifications' },
+      { keys: 'Tab', what: 'walk the tabs' },
+      { keys: '/', what: 'add a tab that holds a search' },
+      { keys: 'Shift+D', what: 'close the tab you added' },
       { keys: 's', what: 'sort Following' },
       { keys: 'R', what: 'refresh, newest on top' },
       { keys: 'c', what: 'the replies, on and off' },
@@ -1596,10 +1598,13 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       // X retired the v1.1 account endpoints, so a cookie session cannot resolve its own handle.
       const handle = auth?.ok && auth.username ? `@${auth.username}` : 'cookie session'
       headerMeta.content = headerLine(auth?.ok ? handle : 'auth pending', state)
-      railFeeds.content = railTabs(state)
+      const railLines = railTabs(state)
+      railFeeds.content = railLines
+      // The rail grows a row per tab the reader adds, so its height comes from what it holds.
+      railFeeds.height = railLines.split('\n').length
       railProfile.content = auth?.ok ? `Signed in\n${handle}\n\n${auth.name ?? ''}` : 'Checking credentials…'
       timelineHeader.content = timeline
-        ? timelineTitle(timeline.id, state.feedSort, timeline.tweetIds.length)
+        ? timelineTitle(state, timeline.id, timeline.tweetIds.length)
         : notificationsTitle(state.notifications)
       // A new tweet always starts at its first line, never at the old offset.
       if (focused?.id !== detailTweetId) {
@@ -1872,7 +1877,13 @@ export const bookmarkCount = (tweet: AppTweet): string =>
 const cardMetrics = (tweet: AppTweet): string =>
   `${tweet.metrics.replies ?? 0} replies   ${tweet.metrics.reposts ?? 0} reposts   ${likeCount(tweet)}${tweet.bookmarked === true ? '   ⚑' : ''}`
 
-export const feedName = (tab: TabId): string => {
+// A tab the reader made is named by the query it holds; the three fixed tabs carry their
+// own names.
+export const tabName = (state: AppState, tab: TabId): string => {
+  const query = searchQueryOf(state, tab)
+  if (query !== undefined) {
+    return query
+  }
   if (tab === 'following') {
     return 'Following'
   }
@@ -1881,11 +1892,11 @@ export const feedName = (tab: TabId): string => {
 
 export const sortName = (sort: FeedSort): string => (sort === 'popular' ? 'Popular' : 'Recent')
 
-// Only Following can be sorted, so naming a sort on For You would promise a control the
-// key does not give there.
-export const timelineTitle = (tab: TabId, sort: FeedSort, count: number): string => {
-  const sortLabel = tab === 'following' ? `${sortName(sort)} · ` : ''
-  return `${feedName(tab)} · ${sortLabel}${count} tweets`
+// Only Following can be sorted, so naming a sort on For You or on a search would promise a
+// control the key does not give there.
+export const timelineTitle = (state: AppState, tab: TimelineId, count: number): string => {
+  const sortLabel = tab === 'following' ? `${sortName(state.feedSort)} · ` : ''
+  return `${tabName(state, tab)} · ${sortLabel}${count} tweets`
 }
 
 // A row is a mention or an aggregated line, so "tweets" would be the wrong word. The unread
@@ -1895,18 +1906,26 @@ export const notificationsTitle = (notifications: NotificationsState): string =>
   return `Notifications · ${notifications.rows.length} rows${unread}`
 }
 
-// The dot marks the open tab. The rail is sixteen columns wide inside its border, which
-// "○ Notifications" fills exactly, so the unread count goes on the header row instead.
+// The rail is sixteen columns wide inside its border, which "○ Notifications" fills exactly.
+// A query longer than that is cut rather than wrapped, because a wrapped line would read as
+// a tab of its own.
+const railLabelWidth = 14
+
+export const railLabel = (name: string): string =>
+  name.length > railLabelWidth ? `${name.slice(0, railLabelWidth - 1)}…` : name
+
+// The dot marks the open tab. The tabs the reader made come after the fixed ones, in the
+// order they were added.
 export const railTabs = (state: AppState): string => {
-  const mark = (tab: TabId): string => (state.activeTab === tab ? '●' : '○')
-  return `${mark('following')} Following\n${mark('forYou')} For You\n${mark('notifications')} Notifications\n\nTab switches\ns sorts`
+  const lines = tabOrder(state).map((tab) => `${state.activeTab === tab ? '●' : '○'} ${railLabel(tabName(state, tab))}`)
+  return [...lines, '', 'Tab switches', 's sorts', '/ adds a tab', 'D closes one'].join('\n')
 }
 
 // The count x.com still holds, on every tab, so the reader sees there is something new
 // without switching to look.
 export const headerLine = (who: string, state: AppState): string => {
   const unread = state.notifications.unread > 0 ? ` · ${state.notifications.unread} unread` : ''
-  return `${who} · ${feedName(state.activeTab)}${unread}`
+  return `${who} · ${tabName(state, state.activeTab)}${unread}`
 }
 
 // x.com draws a heart, a repost arrow or a bell beside each line. One glyph carries the same
@@ -1972,9 +1991,12 @@ const composerLead = (mode: ComposerMode, who: string): string => {
   return mode === 'quote' ? `Quoting ${who}` : `Replying to ${who}`
 }
 
-// The handle says whose tweet the draft answers or reposts, and the count says whether X
-// will take it. A draft over the limit is refused, so the counter turns into the warning.
+// The search prompt borrows the drawer, so it borrows this heading too. It counts no
+// characters, because X takes a query of any length.
 export const composerHeading = (state: AppState): string => {
+  if (state.composer.mode === 'search') {
+    return 'New tab · type a search · Enter opens it · Esc closes'
+  }
   const id = state.composer.targetTweetId
   const target = id ? state.tweets[id] : undefined
   const who = target ? `@${target.author.handle}` : (id ?? 'tweet')

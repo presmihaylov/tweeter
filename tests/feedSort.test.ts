@@ -32,8 +32,10 @@ describe('the feed sort', () => {
   })
 
   test('names the sort on Following and stays quiet about it on For You', () => {
-    expect(timelineTitle('following', 'recent', 77)).toBe('Following · Recent · 77 tweets')
-    expect(timelineTitle('following', 'popular', 31)).toBe('Following · Popular · 31 tweets')
-    expect(timelineTitle('forYou', 'popular', 40)).toBe('For You · 40 tweets')
+    const recent = initialAppState()
+    const popular = setFeedSort(recent, 'popular')
+    expect(timelineTitle(recent, 'following', 77)).toBe('Following · Recent · 77 tweets')
+    expect(timelineTitle(popular, 'following', 31)).toBe('Following · Popular · 31 tweets')
+    expect(timelineTitle(popular, 'forYou', 40)).toBe('For You · 40 tweets')
   })
 })

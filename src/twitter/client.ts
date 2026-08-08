@@ -1,6 +1,6 @@
 import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, analyticsOperation, notBookmarkedCode, notificationParams, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
 import { analyticsRange, analyticsVariables, parseAnalytics, type AnalyticsHistory } from './analytics.ts'
-import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildTweetDetailFeatures, buildUserTweetsFeatures } from './features.ts'
+import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildSearchFeatures, buildTweetDetailFeatures, buildUserTweetsFeatures } from './features.ts'
 import { GraphQLClient } from './graphql.ts'
 import { HeaderBuilder } from './headers.ts'
 import { PageContextStore } from './pageContext.ts'
@@ -8,7 +8,7 @@ import { QueryIdStore } from './queryIds.ts'
 import { generateTransactionId } from './transactionId.ts'
 import { statusUrl } from './urls.ts'
 import type { AuthStatus, BadgeCounts, ConversationPage, DeleteResult, LikeResult, NotificationPage, PostResult, TimelinePage, TweetBundle, TwitterClientOptions, UserTimelinePage, WriteRetryNotice } from './types.ts'
-import { extractCursorFromInstructions, getHomeInstructions, getTweetDetailInstructions, getUserTimelineInstructions, parseConversationTweets, parseHomeTweets, parseNotificationsPage, parseTimelineProfile, parseUserTweets } from './extract/index.ts'
+import { extractCursorFromInstructions, getHomeInstructions, getSearchInstructions, getTweetDetailInstructions, getUserTimelineInstructions, parseConversationTweets, parseHomeTweets, parseNotificationsPage, parseTimelineProfile, parseUserTweets } from './extract/index.ts'
 import { getInt, getMap, getSlice, getStr, isRecord } from '../utils/guards.ts'
 import type { Fetcher } from '../utils/fetcher.ts'
 import { defaultFetcher } from '../utils/fetcher.ts'
@@ -125,6 +125,29 @@ export class TwitterClient {
       return this.gql.get(operationName, queryId, variables, buildHomeTimelineFeatures())
     })
     const instructions = getHomeInstructions(body)
+    return {
+      tweets: parseHomeTweets(instructions),
+      topCursor: extractCursorFromInstructions(instructions, 'Top'),
+      bottomCursor: extractCursorFromInstructions(instructions, 'Bottom')
+    }
+  }
+
+  // A tab the reader made runs this. "Latest" is what x.com's own Latest tab asks for, so the
+  // newest post is the first entry and a refresh puts what arrived since on top.
+  async loadSearchPage(args: { query: string; count: number; cursor?: string }): Promise<TimelinePage> {
+    const variables: Record<string, unknown> = {
+      rawQuery: args.query,
+      count: args.count,
+      querySource: 'typed_query',
+      product: 'Latest'
+    }
+    if (args.cursor) {
+      variables.cursor = args.cursor
+    }
+    const { body } = await this.withQueryIdRetry('SearchTimeline', [], async (queryId) => {
+      return this.gql.get('SearchTimeline', queryId, variables, buildSearchFeatures())
+    })
+    const instructions = getSearchInstructions(body)
     return {
       tweets: parseHomeTweets(instructions),
       topCursor: extractCursorFromInstructions(instructions, 'Top'),

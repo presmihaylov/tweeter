@@ -185,6 +185,13 @@ export const getHomeInstructions = (result: unknown): unknown[] => {
   return getTimelineInstructions(result)
 }
 
+// A search hangs its instructions two levels under the raw query. The entries themselves are
+// the shape every timeline uses, so the home parser reads them.
+export const getSearchInstructions = (result: unknown): unknown[] => {
+  const search = getMap(getMap(getMap(result, 'data'), 'search_by_raw_query'), 'search_timeline')
+  return getSlice(getMap(search, 'timeline'), 'instructions') ?? []
+}
+
 // A profile timeline hangs its instructions under the user, and X has moved them between
 // two names, so both are read. The entries themselves are the shape every timeline uses.
 export const getUserTimelineInstructions = (result: unknown): unknown[] => {

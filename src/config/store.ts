@@ -62,6 +62,15 @@ export class ConfigStore {
     return next
   }
 
+  // The whole list every time, because adding and closing a tab both end here and the order
+  // on the rail is the order in the file.
+  async setSearchTabs(queries: string[]): Promise<TweeterConfig> {
+    const cfg = await this.load()
+    const next: TweeterConfig = { ...cfg, ui: { ...cfg.ui, searchTabs: queries } }
+    await this.save(next)
+    return next
+  }
+
   async setXApiTokens(name: string, tokens: XApiTokens): Promise<TweeterConfig> {
     const cfg = await this.load()
     const existing = cfg.profiles[name]

@@ -57,7 +57,9 @@ The card lays itself out for the window it opens in. It sits in the middle of th
 
 - `?` — open or close the key popup
 - `j` / `k` — move the feed selection, whatever the arrows are pointed at
-- `Tab` — walk the three tabs: Following, For You, Notifications
+- `Tab` — walk the tabs: Following, For You, Notifications, then every tab you added
+- `/` — add a tab that holds a search; type the query, `Enter` opens it
+- `Shift+D` — close the tab you added
 - `s` — sort Following by Popular or Recent
 - `R` — refresh the feed; new tweets come in at the top
 - `→` — point the arrows at the open tweet's text when it does not fit the pane, then open the reply list on its first card
@@ -173,6 +175,18 @@ Two of those lines stand for a second list rather than for a post of yours. `New
 
 The header carries the unread count x.com draws on its own tab, from `badge_count.json`, on every tab rather than only on this one. The app only reads that count. Clearing it is a write, and x.com clears it when you read the tab there, so the number here goes down when x.com says it does and not when you scroll past a row.
 
+## Tabs you add
+
+`/` makes a tab of a search. The drawer opens with the heading `New tab · type a search`, and `Enter` puts the query on the rail after the three fixed tabs. `Tab` walks onto it like any other tab, `R` fetches what arrived since, and `Shift+D` closes it again. The three fixed tabs stay whatever you do, so `Shift+D` on one of them says so and changes nothing.
+
+The tab holds an ordinary timeline. The cards, the detail pane, the reply list and every tweet key work there exactly as they do on Following, because the search answers in the same shape the home feed does: `SearchTimeline` over the same private GraphQL, `product: 'Latest'`, which is what x.com's own Latest tab asks for. One request costs the same as a page of the feed.
+
+A search refreshes by asking again rather than by following a cursor. X answers Latest newest first, so page one already holds whatever arrived since, and the merge drops the ids that are already there. Only the pages below use a cursor, and they page in on their own as the selection nears the end, the way the feeds do.
+
+The query is the name and the key at once. `claude code`, `Claude Code` and `  claude code ` are one tab, so asking twice wins the tab back instead of opening a second one. The rail cuts a name too wide for it with a `…`, because a wrapped line would read as a tab of its own.
+
+The tabs outlive the run. They are written to `ui.searchTabs` in the config file, in the order the rail lists them, and come back empty on the next start; the first `Tab` onto one fetches its first page, the way the two feeds behave. A tab stays until you close it.
+
 ## Replying and liking
 
 Press `r` on the open tweet. The composer opens across the bottom, names the handle you are answering, and counts the draft against the 280-character limit as you type. `Enter` sends it, `Esc` throws it away. A draft over the limit is refused locally, so the text stays in the box instead of dying on a round trip.
@@ -262,11 +276,12 @@ Implemented:
 - `Shift+S` floats a stats page over the panes: posts, replies, impressions and the follower change per day over 7, 14 or 30 days, all four read from X's own analytics query, whose id lives in a chunk x.com loads only when you open that page
 - `?` floats a centred key popup over the panes, in three columns that collapse to two and then one on a narrow terminal, and scroll when the window is too short
 - `R` refreshes from the top cursor and prepends what is new, while the older pages page in from the bottom cursor on their own as the selection nears the end
+- `/` adds a tab that holds a search, off `SearchTimeline` with `product: 'Latest'`, refreshed by `R` and closed by `Shift+D`, kept across runs in `ui.searchTabs`
 - a Notifications tab on `Tab`, off the old REST `notifications/all.json`: mentions as ordinary tweet cards, everything else as X's own aggregated line with a `♥`/`↻`/`⊕`/`◆` glyph and an avatar, every tweet shortcut acting on the row under the cursor
 - `Enter` on a notification line that stands for a list, such as the bell line or an aggregated like, fetches that list and draws it as cards under the line
 - the unread badge from `badge_count.json` in the header, read only, so x.com stays the one thing that clears it
 - automatic retry with backoff on X's transient write refusal (error 344) and on its automation gate (error 226, up to 5 retries over 230s), for replies, likes and bookmarks
-- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, notifications, the key popup and its reflow, the stats page and the analytics it reads, the cookie write path and its refusal codes, OAuth flow, media helpers
+- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, notifications, the tabs you add and the search behind them, the key popup and its reflow, the stats page and the analytics it reads, the cookie write path and its refusal codes, OAuth flow, media helpers
 
 Live X GraphQL endpoints can still break when operation IDs or response shapes change; query ID refresh and tests are set up to make those failures visible. Replies additionally depend on X's automation heuristic, which X can tighten at any time.
 

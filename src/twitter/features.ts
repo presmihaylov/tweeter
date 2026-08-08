@@ -83,6 +83,10 @@ export const buildUserTweetsFeatures = (): FeatureMap => ({
   responsive_web_grok_analyze_post_followups_enabled: false
 })
 
+// The search timeline asks for the same switches as the profile one. It names six the home
+// timeline does not, and X refuses a request that leaves one of them out.
+export const buildSearchFeatures = (): FeatureMap => buildUserTweetsFeatures()
+
 // CreateTweet declares its own feature set and rejects a request that omits one it needs.
 // This is the exact set the write path was verified against, so it is kept separate from
 // the read features, which change on their own schedule.

@@ -179,7 +179,7 @@ describe('the popup on the screen', () => {
   // popup is for. The narrow layout has to keep every line whole.
   test('keeps every description on one line on a narrow terminal', async () => {
     for (const width of [110, 80]) {
-      const frame = await frameOf(true, width, 46)
+      const frame = await frameOf(true, width, 48)
       for (const group of helpGroups) {
         for (const entry of group.entries) {
           expect(frame).toContain(`${entry.keys}  `)

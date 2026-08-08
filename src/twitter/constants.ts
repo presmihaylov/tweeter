@@ -14,6 +14,7 @@ export const fallbackQueryIds: Readonly<Record<string, string>> = {
   UnfavoriteTweet: 'ZYKSe-w7KEslx3JhSIk5LA',
   CreateBookmark: 'aoDbu3RHznuiSkQ9aNM67Q',
   DeleteBookmark: 'Wlmlj2-xzyS1GN3a6cj-mQ',
+  SearchTimeline: 'PusO6nN_nUSAsfJktZJd9w',
   accountOverviewDailyQuery: '_P1caq0YB4SVuEtFLPDMfQ'
 }
 
