@@ -13,6 +13,7 @@ import { caretMoveFor, cleanPasted, helpScrollStep, isCtrlEnterKey, isEnterKey, 
 import { buildStatsRows, coveredFromOf, statsTotals, type StatsWindow } from '../stats/aggregate.ts'
 import { loadStatsTweets } from '../stats/load.ts'
 import { readFollowerLog, recordFollowers, writeFollowerLog, type FollowerLog } from '../stats/followerLog.ts'
+import type { FollowerHistory } from '../twitter/analytics.ts'
 import { createImageLayer, writeToTerminal, type ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize } from '../media/geometry.ts'
 import { detectImageRenderer } from '../media/detect.ts'
@@ -276,19 +277,43 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     const userId = userIdFromCookies(profile.cookieHeader ?? '')
     let statsCache: { tweets: AppTweet[]; profile?: AppProfile; window: StatsWindow; coveredFrom?: string; complete: boolean } | undefined
     let followerLog: FollowerLog = {}
+    let followerHistory: FollowerHistory = {}
     // Only the newest load may write to the page. A wider window asked for while the last
     // one still pages would otherwise draw its own rows over the newer ones.
     let statsRun = 0
     let statsInFlight: StatsWindow | undefined
 
     const countStats = (cache: NonNullable<typeof statsCache>, window: StatsWindow, now: Date, more = false): void => {
-      const rows = buildStatsRows({ tweets: cache.tweets, userId: userId ?? '', window, now, followers: followerLog, coveredFrom: cache.coveredFrom })
+      const rows = buildStatsRows({ tweets: cache.tweets, userId: userId ?? '', window, now, followers: followerLog, followerHistory, coveredFrom: cache.coveredFrom })
       state = mergeStats(state, { rows, totals: statsTotals(rows), profile: cache.profile, loadedWindow: cache.window, loading: more })
       rerender()
     }
 
-    // X reports the follower count for right now, so every load writes it down. A day the
-    // app never ran leaves no count, and the page says so rather than guessing.
+    const recountStats = (now: Date): void => {
+      const cache = statsCache
+      if (!cache || cache.window < state.stats.window) {
+        return
+      }
+      countStats(cache, state.stats.window, now, statsInFlight !== undefined)
+    }
+
+    // One request answers for the whole window, so it runs beside the timeline walk rather
+    // than after it. An account X refuses analytics for keeps the sampled counts instead.
+    const loadFollowerHistory = async (window: StatsWindow, now: Date, run: number): Promise<void> => {
+      try {
+        const history = await client.loadFollowerHistory({ days: window, now })
+        if (run !== statsRun) {
+          return
+        }
+        followerHistory = { ...followerHistory, ...history }
+        recountStats(now)
+      } catch (error) {
+        await debugLogger.log('ui.stats.followerHistory.failed', { window, error: errorMessage(error) })
+      }
+    }
+
+    // X reports the follower count for right now, so every load writes it down. It is the
+    // fallback for an account whose analytics X will not serve.
     const sampleFollowers = async (found: AppProfile | undefined, now: Date): Promise<void> => {
       if (!found) {
         return
@@ -312,6 +337,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       try {
         const now = new Date()
         followerLog = await readFollowerLog()
+        void loadFollowerHistory(window, now, run)
         const load = await loadStatsTweets({
           client,
           userId,

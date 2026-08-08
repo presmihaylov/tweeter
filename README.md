@@ -95,7 +95,11 @@ The drawer is a text field. `←` / `→` move the caret, `Alt+←` / `Alt+→` 
 
 The numbers come from your own profile timeline, which tweeter pages back through until it passes the oldest day of the window, up to two pages for each day of it. X serves about 36 cards per page whatever the request asks for, so a month of a busy account costs a dozen or so pages and about ten seconds. The rows fill in as the pages land rather than after the last one, so the table is readable while it grows. Posts and replies are what you wrote that day, so a repost of somebody else's tweet and a tweet you only appear in are left out. Impressions are the views X reports so far on what you wrote that day, not the views the day itself drew; a tweet keeps collecting them after the day ends. A day the pages never reached shows `·` rather than a row of zeros.
 
-The follower change needs a second reading. X reports the count for right now and keeps no history of it, so tweeter writes the count down in `~/.config/tweeter/followers.json` every time the page opens, and a day can only name a change when the day before it has a count too. The file starts empty, so the column fills in from the day you first open the page, and it keeps 120 days. A day you never ran tweeter shows `·`.
+The follower change comes from X's own count of who followed you and who left, the one behind x.com's analytics page. One `accountOverviewDailyQuery` answers for the whole window, so the column is filled in for days long before you first ran tweeter, and it is a real gain and loss rather than the gap between two snapshots. X buckets those days in UTC, as its own page and its own CSV export do, so a day here can be a few hours out of step with the local day the other three columns count. The request runs beside the timeline walk and the column fills in when it lands.
+
+That query lives in a chunk x.com loads only when you open the analytics page, so its id is in neither the main nor the vendor bundle. Query id discovery reads the webpack loader inlined in the signed-in shell, builds the `bundle.AccountAnalytics` chunk url out of the loader's own name and hash maps, and reads the id out of it. Relay names the pair its own way, `params:{id,name}` rather than `queryId`/`operationName`, so discovery knows that shape too.
+
+For an account X serves no analytics for, the sampled counts stand in. tweeter writes the follower count down in `~/.config/tweeter/followers.json` every time the page opens and keeps 120 days, and a day can then name a change only when the day before it has a count too. A day with neither reading shows `·`.
 
 A tweet with several photos draws them side by side, up to the four X allows. Click one to enlarge it.
 
@@ -255,7 +259,7 @@ Implemented:
 - `Shift+P` writes a new post of your own, in the same drawer, with no tweet behind it
 - `Shift+Enter` (or `Alt+Enter`) starts a new line in the drawer, while `Enter` still sends
 - `y` copies the open tweet's link to the system clipboard, with a green note in the top right corner of the pane that goes on its own
-- `Shift+S` floats a stats page over the panes: posts, replies, impressions and the follower change per day over 7, 14 or 30 days, counted from your profile timeline, with the follower count sampled daily into `~/.config/tweeter/followers.json` because X keeps no history of it
+- `Shift+S` floats a stats page over the panes: posts, replies, impressions and the follower change per day over 7, 14 or 30 days, the first three counted from your profile timeline and the last read from X's own analytics query, with a daily sample in `~/.config/tweeter/followers.json` as the fallback
 - `?` floats a centred key popup over the panes, in three columns that collapse to two and then one on a narrow terminal, and scroll when the window is too short
 - `R` refreshes from the top cursor and prepends what is new, while the older pages page in from the bottom cursor on their own as the selection nears the end
 - a Notifications tab on `Tab`, off the old REST `notifications/all.json`: mentions as ordinary tweet cards, everything else as X's own aggregated line with a `♥`/`↻`/`⊕`/`◆` glyph and an avatar, every tweet shortcut acting on the row under the cursor

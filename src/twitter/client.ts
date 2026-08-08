@@ -1,4 +1,5 @@
-import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, notBookmarkedCode, notificationParams, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
+import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, followerHistoryOperation, notBookmarkedCode, notificationParams, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
+import { followerHistoryRange, followerHistoryVariables, parseFollowerHistory, type FollowerHistory } from './analytics.ts'
 import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildTweetDetailFeatures, buildUserTweetsFeatures } from './features.ts'
 import { GraphQLClient } from './graphql.ts'
 import { HeaderBuilder } from './headers.ts'
@@ -159,6 +160,20 @@ export class TwitterClient {
       topCursor: extractCursorFromInstructions(instructions, 'Top'),
       bottomCursor: extractCursorFromInstructions(instructions, 'Bottom')
     }
+  }
+
+  // How many people followed and unfollowed you on each of the last days. This is the read
+  // behind x.com's own analytics page, and it is the only one that knows: the profile
+  // timeline carries the follower count for right now and no history at all.
+  async loadFollowerHistory(args: { days: number; now: Date }): Promise<FollowerHistory> {
+    // One day more than the rows need. X buckets by UTC day and the rows are local days, so
+    // west of UTC the oldest row is a day X was never asked about.
+    const days = args.days + 1
+    const variables = followerHistoryVariables(args.now, days)
+    const { body } = await this.withQueryIdRetry(followerHistoryOperation, [], async (queryId) => {
+      return this.gql.get(followerHistoryOperation, queryId, variables, {})
+    })
+    return parseFollowerHistory(body, followerHistoryRange(args.now, days))
   }
 
   // The notifications tab is the one read X never moved to GraphQL, so it goes over the old

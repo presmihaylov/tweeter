@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { HeaderBuilder } from '../src/twitter/headers.ts'
 import { extractMedia } from '../src/twitter/extract/media.ts'
 import { parseConversationTweets, parseHomeTweets, parseTweetsFromInstructions, upsizeAvatar } from '../src/twitter/extract/tweet.ts'
-import { findOperationId } from '../src/twitter/queryIds.ts'
+import { chunkUrlOf, findOperationId } from '../src/twitter/queryIds.ts'
 import { TwitterClient } from '../src/twitter/client.ts'
 import { tweetUrl } from '../src/media/openExternal.ts'
 import { asReplyTo, asRepost, homeConversationEntry, homeEntries, homeTweetEntry, jsonResponse, makeTweetResult, promotedThreadEntry, promotedTweetEntry, relatedTweetsEntry, textResponse, timelineBody, tweetDetailBody, videoEntity, withQuotedTweet } from './helpers.ts'
@@ -96,6 +96,33 @@ describe('twitter primitives', () => {
   test('finds operation ids in bundle text', () => {
     expect(findOperationId('operationName:"HomeTimeline",queryId:"abcDEF_123456"', 'HomeTimeline')).toBe('abcDEF_123456')
   })
+
+  // The analytics page is a Relay app, and Relay writes the pair the other way about.
+  test('finds an operation id a Relay query names in its own way', () => {
+    const source = 'params:{id:"_P1caq0YB4SVuEtFLPDMfQ",metadata:{},name:"accountOverviewDailyQuery",operationKind:"query",text:null}'
+    expect(findOperationId(source, 'accountOverviewDailyQuery')).toBe('_P1caq0YB4SVuEtFLPDMfQ')
+  })
+})
+
+// A chunk nothing on the page links still has a name and a hash in the loader, and that is
+// enough to ask for it.
+describe('the lazy chunks of the x.com shell', () => {
+  const shell = [
+    'var p={};p.u=e=>""+(({7:"bundle.AccountAnalytics",8:"bundle.Other"})[e]||e)+"."+({7:"9f0d1c2",8:"aaa1111"})[e]+"a.js";',
+    'p.p="https://abs.twimg.test/responsive-web/client-web/";'
+  ].join('')
+
+  test('a named chunk becomes a url', () => {
+    expect(chunkUrlOf(shell, 'bundle.AccountAnalytics')).toBe('https://abs.twimg.test/responsive-web/client-web/bundle.AccountAnalytics.9f0d1c2a.js')
+  })
+
+  test('a chunk the loader never names has no url', () => {
+    expect(chunkUrlOf(shell, 'bundle.Missing')).toBeUndefined()
+  })
+
+  test('a page without the loader has no url either', () => {
+    expect(chunkUrlOf('<html></html>', 'bundle.AccountAnalytics')).toBeUndefined()
+  })
 })
 
 describe('TwitterClient read paths', () => {
@@ -144,6 +171,41 @@ describe('TwitterClient read paths', () => {
     expect(captured[0]?.variables.enableRanking).toBe(false)
     expect(captured[1]?.variables.enableRanking).toBe(true)
     expect(captured[2]?.variables).not.toHaveProperty('enableRanking')
+  })
+
+  test('reads the follower history from the analytics query', async () => {
+    const asked: URL[] = []
+    const fetchMock = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = new URL(input.toString())
+      if (!url.pathname.includes('accountOverviewDailyQuery')) {
+        return textResponse('', { status: 404 })
+      }
+      asked.push(url)
+      return jsonResponse({
+        data: {
+          viewer_v2: {
+            user_results: {
+              result: {
+                current_time_series: [
+                  { engagement_type: 'Follow', count: 7, timestamp: Date.parse('2026-08-04T00:00:00Z') },
+                  { engagement_type: 'Unfollow', count: 2, timestamp: Date.parse('2026-08-04T00:00:00Z') }
+                ],
+                hourly_backfill: []
+              }
+            }
+          }
+        }
+      })
+    }
+    const client = new TwitterClient({ authToken: 'auth', ct0: 'csrf', fetch: fetchMock, graphQLBase: 'https://x.com/i/api/graphql' })
+    const history = await client.loadFollowerHistory({ days: 7, now: new Date('2026-08-08T10:00:00Z') })
+    expect(asked).toHaveLength(1)
+    expect(asked[0]?.searchParams.get('features')).toBe('{}')
+    expect(history['2026-08-04']).toEqual({ follows: 7, unfollows: 2 })
+    expect(history['2026-08-03']).toEqual({ follows: 0, unfollows: 0 })
+    // A day more than the rows ask for, because a local day can sit outside the UTC window.
+    expect(Object.keys(history)).toHaveLength(8)
+    expect(history['2026-08-01']).toEqual({ follows: 0, unfollows: 0 })
   })
 
   test('keeps Discover more tweets and injected ads out of the replies', async () => {

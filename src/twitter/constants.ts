@@ -13,7 +13,17 @@ export const fallbackQueryIds: Readonly<Record<string, string>> = {
   FavoriteTweet: 'lI07N6Otwv1PhnEgXILM7A',
   UnfavoriteTweet: 'ZYKSe-w7KEslx3JhSIk5LA',
   CreateBookmark: 'aoDbu3RHznuiSkQ9aNM67Q',
-  DeleteBookmark: 'Wlmlj2-xzyS1GN3a6cj-mQ'
+  DeleteBookmark: 'Wlmlj2-xzyS1GN3a6cj-mQ',
+  accountOverviewDailyQuery: '_P1caq0YB4SVuEtFLPDMfQ'
+}
+
+// The one read the stats page makes for follower history. x.com draws that page from a
+// chunk it loads only when you open it, so the id is in neither the main nor the vendor
+// bundle: discovery has to build the chunk URL out of the shell's own chunk map.
+export const followerHistoryOperation = 'accountOverviewDailyQuery'
+
+export const lazyChunkOperations: Readonly<Record<string, string>> = {
+  [followerHistoryOperation]: 'bundle.AccountAnalytics'
 }
 
 export const tweetTextLimit = 280

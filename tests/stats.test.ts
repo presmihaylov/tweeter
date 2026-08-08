@@ -6,6 +6,7 @@ import { createTestRenderer } from '@opentui/core/testing'
 import { isStatsKey } from '../src/app/keyEvents.ts'
 import { buildStatsRows, coveredFromOf, dayKey, dayLabel, nextStatsWindow, previousDay, recentDays, statsTotals } from '../src/stats/aggregate.ts'
 import { readFollowerLog, recordFollowers, writeFollowerLog } from '../src/stats/followerLog.ts'
+import { followerHistoryRange, followerHistoryVariables, parseFollowerHistory, utcDayKey } from '../src/twitter/analytics.ts'
 import { loadStatsTweets, statsPageCapFor, statsPageSize } from '../src/stats/load.ts'
 import { formatChange, formatCount, statsBodyLines, statsHeadline, statsTableLines } from '../src/app/statsView.ts'
 import { createMainScreen, statsScrollMaxOf } from '../src/app/mainScreen.ts'
@@ -205,6 +206,95 @@ describe('the follower change', () => {
 
   test('no sample at all leaves the total without a change', () => {
     expect(statsTotals(buildStatsRows({ tweets: [], userId: me, window: 7, now })).followerChange).toBeUndefined()
+  })
+
+  test('what X counted beats the samples taken here', () => {
+    const rows = buildStatsRows({
+      tweets: [],
+      userId: me,
+      window: 7,
+      now,
+      followers: { '2026-08-08': 1210, '2026-08-07': 1200 },
+      followerHistory: { '2026-08-08': { follows: 30, unfollows: 4 } }
+    })
+    expect(rows[0]?.followerChange).toBe(26)
+  })
+
+  test('a day X says nothing about falls back to the samples', () => {
+    const rows = buildStatsRows({
+      tweets: [],
+      userId: me,
+      window: 7,
+      now,
+      followers: { '2026-08-08': 1210, '2026-08-07': 1200 },
+      followerHistory: { '2026-08-06': { follows: 1, unfollows: 0 } }
+    })
+    expect(rows[0]?.followerChange).toBe(10)
+  })
+})
+
+describe('the follower history X counts itself', () => {
+  const analyticsBody = (series: unknown[], backfill: unknown[] = []): unknown => ({
+    data: { viewer_v2: { user_results: { result: { current_time_series: series, hourly_backfill: backfill } } } }
+  })
+
+  const row = (kind: string, count: number, at: string): unknown => ({
+    engagement_type: kind,
+    count,
+    timestamp: Date.parse(at),
+    is_engaging_user_verified: false
+  })
+
+  test('the window ends after today and runs back the days it asks for', () => {
+    const variables = followerHistoryVariables(new Date('2026-08-08T10:00:00Z'), 7)
+    expect(variables.current_to_iso).toBe('2026-08-09T00:00:00.000Z')
+    expect(variables.current_from_iso).toBe('2026-08-02T00:00:00.000Z')
+    expect(variables.prev_from_iso).toBe('2026-07-26T00:00:00.000Z')
+    expect(variables.prev_to_iso).toBe('2026-08-02T00:00:00.000Z')
+  })
+
+  // The daily series lags about two days, so the second series has to reach yesterday.
+  test('the finer series covers yesterday and today', () => {
+    const variables = followerHistoryVariables(new Date('2026-08-08T10:00:00Z'), 7)
+    expect(new Date(Number(variables.backfill_from)).toISOString()).toBe('2026-08-07T00:00:00.000Z')
+    expect(new Date(Number(variables.backfill_to)).toISOString()).toBe('2026-08-09T00:00:00.000Z')
+  })
+
+  test('every day of the window is named, oldest first', () => {
+    const days = followerHistoryRange(new Date('2026-08-08T10:00:00Z'), 7)
+    expect(days).toHaveLength(7)
+    expect(days[0]).toBe('2026-08-02')
+    expect(days.at(-1)).toBe('2026-08-08')
+  })
+
+  test('a day is the UTC day X bucketed it in', () => {
+    expect(utcDayKey(Date.parse('2026-08-08T23:30:00Z'))).toBe('2026-08-08')
+  })
+
+  test('follows and unfollows come together, and the other kinds stay out', () => {
+    const history = parseFollowerHistory(analyticsBody([
+      row('Follow', 12, '2026-08-05T00:00:00Z'),
+      row('Unfollow', 5, '2026-08-05T00:00:00Z'),
+      row('Displayed', 9000, '2026-08-05T00:00:00Z')
+    ]))
+    expect(history['2026-08-05']).toEqual({ follows: 12, unfollows: 5 })
+  })
+
+  test('the finer series adds to the days the daily one already has', () => {
+    const history = parseFollowerHistory(
+      analyticsBody([row('Follow', 2, '2026-08-08T00:00:00Z')], [row('Follow', 3, '2026-08-08T06:00:00Z')])
+    )
+    expect(history['2026-08-08']).toEqual({ follows: 5, unfollows: 0 })
+  })
+
+  // X sends no row for a quiet day, and a quiet day is not an unknown day.
+  test('a day nobody followed or left reads as zero', () => {
+    const history = parseFollowerHistory(analyticsBody([]), ['2026-08-07', '2026-08-08'])
+    expect(history['2026-08-07']).toEqual({ follows: 0, unfollows: 0 })
+  })
+
+  test('an answer X refuses leaves the history empty, so the samples still speak', () => {
+    expect(parseFollowerHistory({ data: {} }, ['2026-08-08'])).toEqual({})
   })
 })
 
@@ -450,6 +540,7 @@ describe('the table', () => {
     expect(body[0]).toContain('@me')
     expect(body[0]).toContain('1,200 followers')
     expect(body.join('\n')).toContain('Impressions are the views so far')
+    expect(body.join('\n')).toContain('follows minus unfollows')
   })
 
   test('a window with no account behind it still says which window it is', () => {

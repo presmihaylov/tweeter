@@ -56,11 +56,11 @@ export const statsHeadline = (profile: AppProfile | undefined, window: StatsWind
   return `@${profile.handle} · ${formatCount(profile.followers)} followers · ${formatCount(profile.following)} following · ${formatCount(profile.posts)} posts`
 }
 
-// What the numbers do and do not mean. X gives no history for either one, so the page says
-// where its own numbers come from rather than letting the reader assume.
+// What the numbers do and do not mean. The two columns come from two different reads, so
+// the page says where each one comes from rather than letting the reader assume.
 export const statsNotes = (): string[] => [
   'Impressions are the views so far on what you wrote that day.',
-  'A follower change needs a count from the day before, taken while tweeter ran.'
+  'A follower change is what X counted: follows minus unfollows, in UTC days.'
 ]
 
 export const statsBodyLines = (args: {

@@ -1,8 +1,9 @@
+import type { FollowerHistory } from '../twitter/analytics.ts'
 import type { AppTweet } from '../twitter/types.ts'
 import { parseTweetTime } from '../utils/time.ts'
 
-// The three windows the page offers. X keeps no daily history of its own, so a longer one
-// would only mean more pages of the profile timeline for the same four numbers.
+// The three windows the page offers. A longer one would mean more pages of the profile
+// timeline for the same four numbers, and X's own analytics never look further back.
 export const statsWindows = [7, 14, 30] as const
 
 export type StatsWindow = (typeof statsWindows)[number]
@@ -69,9 +70,10 @@ export const buildStatsRows = (args: {
   window: StatsWindow
   now: Date
   followers?: Record<string, number>
+  followerHistory?: FollowerHistory
   coveredFrom?: string
 }): StatsRow[] => {
-  const { tweets, userId, window, now, followers = {}, coveredFrom } = args
+  const { tweets, userId, window, now, followers = {}, followerHistory = {}, coveredFrom } = args
   const days = recentDays(now, window)
   const counted = new Map<string, { posts: number; replies: number; impressions: number }>()
   for (const day of days) {
@@ -98,15 +100,20 @@ export const buildStatsRows = (args: {
     return {
       day,
       ...row,
-      followerChange: followerChangeOn(followers, day),
+      followerChange: followerChangeOn(followerHistory, followers, day),
       covered: coveredFrom === undefined || day >= coveredFrom
     }
   })
 }
 
-// X reports the follower count for right now and nothing else, so a change is the gap
-// between two samples this app took. Only the day after a sample can name one.
-const followerChangeOn = (followers: Record<string, number>, day: string): number | undefined => {
+// X counts every follow and unfollow, so its own numbers answer the question outright and
+// answer it for days before this app ever ran. The sampled counts stay as the fallback for
+// an account whose analytics X will not serve: a change is then the gap between two samples.
+const followerChangeOn = (history: FollowerHistory, followers: Record<string, number>, day: string): number | undefined => {
+  const counted = history[day]
+  if (counted) {
+    return counted.follows - counted.unfollows
+  }
   const today = followers[day]
   const before = followers[previousDay(day)]
   if (today === undefined || before === undefined) {
