@@ -1,5 +1,5 @@
 import type { AppProfile, AppTweet } from '../types.ts'
-import { getBool, getInt, getMap, getSlice, getStr, isRecord } from '../../utils/guards.ts'
+import { getBool, getFlag, getInt, getMap, getSlice, getStr, isRecord } from '../../utils/guards.ts'
 import { extractMedia } from './media.ts'
 import { extractArticle } from './article.ts'
 import { extractTweetText } from './text.ts'
@@ -34,6 +34,8 @@ export const mapTweetResult = (result: unknown, quoteDepth = 1): AppTweet | unde
   const quotedTweet = quoteDepth > 0 && quotedResult ? mapTweetResult(quotedResult, quoteDepth - 1) : undefined
   const authorId = getStr(userResult, 'rest_id')
   const avatarUrl = getStr(getMap(userResult, 'avatar'), 'image_url') || getStr(userLegacy, 'profile_image_url_https')
+  // X moved the follow flags out of legacy and into a map of their own.
+  const perspectives = getMap(userResult, 'relationship_perspectives')
   return stripUndefined({
     id,
     text,
@@ -42,7 +44,9 @@ export const mapTweetResult = (result: unknown, quoteDepth = 1): AppTweet | unde
       handle,
       name,
       avatarUrl: upsizeAvatar(avatarUrl) || undefined,
-      verified: getBool(userResult, 'is_blue_verified') || getBool(userLegacy, 'verified') || undefined
+      verified: getBool(userResult, 'is_blue_verified') || getBool(userLegacy, 'verified') || undefined,
+      following: getFlag(perspectives, 'following'),
+      followedBy: getFlag(perspectives, 'followed_by')
     }),
     createdAt: getStr(legacy, 'created_at') || undefined,
     media: extractMedia(unwrapped),

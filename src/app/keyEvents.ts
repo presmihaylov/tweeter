@@ -77,6 +77,11 @@ export const isHelpKey = (key: AppKey): boolean =>
 export const isStatsKey = (key: AppKey): boolean =>
   !key.ctrl && key.meta !== true && (key.name === 'S' || (key.shift === true && key.name === 's'))
 
+// Shift+F follows or unfollows the author of the open tweet. A plain f is free, but the two
+// writes on the account itself carry a Shift, as Shift+P and Shift+S do.
+export const isFollowKey = (key: AppKey): boolean =>
+  !key.ctrl && key.meta !== true && (key.name === 'F' || (key.shift === true && key.name === 'f'))
+
 // How far the key popup moves. A short terminal cannot hold every key at once, so the same
 // keys that walk a list walk the popup, and the page keys jump a screen.
 export const helpScrollStep = (key: AppKey): number => {

@@ -44,6 +44,15 @@ export const getBool = (value: unknown, key: string): boolean => {
   return value[key] === true
 }
 
+// A flag X may not have sent at all. `false` and absent mean different things for a
+// relationship: one says you do not follow the account, the other says X did not say.
+export const getFlag = (value: unknown, key: string): boolean | undefined => {
+  if (!isRecord(value) || typeof value[key] !== 'boolean') {
+    return undefined
+  }
+  return value[key]
+}
+
 export const getInt = (value: unknown, key: string): number => {
   if (!isRecord(value)) {
     return 0

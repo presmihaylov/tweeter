@@ -54,6 +54,23 @@ export const notificationParams: Readonly<Record<string, string>> = {
   include_ext_edit_control: 'true'
 }
 
+// What x.com sends with a follow or an unfollow. The switches only decide how much of the
+// account comes back in the answer; the user_id beside them is what the call acts on.
+export const friendshipParams: Readonly<Record<string, string>> = {
+  include_profile_interstitial_type: '1',
+  include_blocking: '1',
+  include_blocked_by: '1',
+  include_followed_by: '1',
+  include_want_retweets: '1',
+  include_mute_edge: '1',
+  include_can_dm: '1',
+  include_can_media_tag: '1',
+  include_ext_is_blue_verified: '1',
+  include_ext_verified_type: '1',
+  include_ext_profile_image_shape: '1',
+  skip_status: '1'
+}
+
 // X answers a second like on the same tweet with this code. The like the caller asked for
 // is already on the tweet, so the call did its job and the code is not a failure. A second
 // bookmark answers with the same code, and with the same "already favorited" wording.

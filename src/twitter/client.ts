@@ -1,4 +1,4 @@
-import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, analyticsOperation, notBookmarkedCode, notificationParams, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
+import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, analyticsOperation, friendshipParams, notBookmarkedCode, notificationParams, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
 import { analyticsRange, analyticsVariables, parseAnalytics, type AnalyticsHistory } from './analytics.ts'
 import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildSearchFeatures, buildTweetDetailFeatures, buildUserTweetsFeatures } from './features.ts'
 import { GraphQLClient } from './graphql.ts'
@@ -416,6 +416,44 @@ export class TwitterClient {
         return { ok: false, error: errorMessage(error) }
       }
     })
+  }
+
+  // A follow is the other write X never moved to GraphQL: one form post to the old REST API,
+  // which answers with the account itself. Both directions differ only in the path, and X
+  // takes a repeat of either without complaint, so a double press cannot break the pair.
+  async setFollow(args: { userId: string; following: boolean; onRetry?: (notice: WriteRetryNotice) => void }): Promise<LikeResult> {
+    const path = args.following ? '/i/api/1.1/friendships/create.json' : '/i/api/1.1/friendships/destroy.json'
+    return this.withWriteRetry(path, args.onRetry, async () => {
+      try {
+        const { body, status } = await this.restPost(path, new URLSearchParams({ ...friendshipParams, user_id: args.userId }))
+        if (getStr(body, 'id_str') !== '') {
+          return { ok: true }
+        }
+        const failure = graphQLError(body, status)
+        await this.debugLogger?.log('twitter.setFollow.refused', { path, userId: args.userId, status, code: failure.code, transactionIdSent: this.lastTransactionIdSent, body: safeJsonSnippet(body) })
+        return { ok: false, ...failure }
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) }
+      }
+    })
+  }
+
+  // The refusal carries the reason in its body, so a bad status is handed back rather than
+  // thrown. Only a body that is not JSON at all is an error here.
+  private async restPost(path: string, form: URLSearchParams): Promise<{ body: unknown; status: number }> {
+    const transactionId = await this.transactionIdFor(path, 'POST')
+    const headers = this.headers.formHeaders({ referer: 'https://x.com/home' })
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: transactionId ? { ...headers, 'x-client-transaction-id': transactionId } : headers,
+      body: form.toString()
+    })
+    const text = await response.text()
+    try {
+      return { body: JSON.parse(text) as unknown, status: response.status }
+    } catch {
+      throw new Error(`X answered ${path} with something that is not JSON (status ${response.status})`)
+    }
   }
 
   async deleteTweet(tweetId: string): Promise<DeleteResult> {

@@ -196,11 +196,11 @@ describe('the popup on the screen', () => {
     expect(max).toBeGreaterThan(0)
     const top = await frameOf(true, 69, 30)
     expect(top).toContain('walk the feed')
-    expect(top).not.toContain('take the character after')
+    expect(top).not.toContain('take a character either side')
     expect(top).toContain('↑ ↓ scrolls')
 
     const bottom = await frameOf(true, 69, 30, max)
-    expect(bottom).toContain('take the character after')
+    expect(bottom).toContain('take a character either side')
     expect(bottom).not.toContain('walk the feed')
     // A clipped row that escaped the card would paint past its right border.
     for (const line of bottom.split('\n')) {

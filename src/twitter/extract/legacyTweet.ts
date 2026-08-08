@@ -1,5 +1,5 @@
 import type { AppTweet } from '../types.ts'
-import { getBool, getInt, getMap, getStr } from '../../utils/guards.ts'
+import { getBool, getFlag, getInt, getMap, getStr } from '../../utils/guards.ts'
 import { extractMedia } from './media.ts'
 import { upsizeAvatar } from './tweet.ts'
 
@@ -24,7 +24,10 @@ export const mapLegacyTweet = (raw: unknown, users: unknown): AppTweet | undefin
       handle,
       name: getStr(user, 'name') || handle,
       avatarUrl: upsizeAvatar(getStr(user, 'profile_image_url_https')) || undefined,
-      verified: getBool(user, 'ext_is_blue_verified') || getBool(user, 'verified') || undefined
+      verified: getBool(user, 'ext_is_blue_verified') || getBool(user, 'verified') || undefined,
+      // The old shape keeps the follow flags on the user itself.
+      following: getFlag(user, 'following'),
+      followedBy: getFlag(user, 'followed_by')
     }),
     createdAt: getStr(raw, 'created_at') || undefined,
     // extractMedia reads entities under a legacy key, which is exactly what this tweet is.

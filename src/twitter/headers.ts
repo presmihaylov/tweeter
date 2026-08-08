@@ -67,6 +67,11 @@ export class HeaderBuilder {
     return { ...this.baseHeaders(options), 'content-type': 'application/json' }
   }
 
+  // The follow endpoints are the old REST API, which takes a form body rather than JSON.
+  formHeaders(options: { origin?: string; referer?: string } = {}): Record<string, string> {
+    return { ...this.baseHeaders(options), 'content-type': 'application/x-www-form-urlencoded' }
+  }
+
   // Fetching the app shell needs the cookie and nothing else. The API headers would make
   // x.com answer with JSON instead of the HTML that lists the script bundles.
   htmlHeaders(): Record<string, string> {

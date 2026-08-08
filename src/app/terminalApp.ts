@@ -4,12 +4,12 @@ import { TwitterClient, userIdFromCookies } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { addSearchTab, applyBookmark, applyLike, beginConversationLoad, beginStatsLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, closeStats, clearToast, collapseNotice, deleteFromDraft, emptyTimeline, enterSelection, expandNotice, failConversationLoad, failStatsLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, isSearchTab, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeStats, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, removeSearchTab, repliesOpen, searchQueryOf, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, scrollStats, selectRelativeTweet, setFeedSort, showToast, tabOrder, toggleHelp, toggleLightbox, toggleReplies, toggleStats, turnStatsWindow, videoOf, type AppState, type TabId, type TimelineId, type TimelineState, type WriteMode } from '../state/store.ts'
+import { addSearchTab, applyBookmark, applyFollow, applyLike, beginConversationLoad, beginStatsLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, closeStats, clearToast, collapseNotice, deleteFromDraft, emptyTimeline, enterSelection, expandNotice, failConversationLoad, failStatsLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, isSearchTab, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeStats, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, relationOf, removeSearchTab, repliesOpen, searchQueryOf, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, scrollStats, selectRelativeTweet, setFeedSort, showToast, tabOrder, toggleHelp, toggleLightbox, toggleReplies, toggleStats, turnStatsWindow, videoOf, type AppState, type TabId, type TimelineId, type TimelineState, type WriteMode } from '../state/store.ts'
 import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
-import { caretMoveFor, cleanPasted, helpScrollStep, isCtrlEnterKey, isEnterKey, isHelpKey, isNewlineKey, isStatsKey, isTextInput, pastedText } from './keyEvents.ts'
+import { caretMoveFor, cleanPasted, helpScrollStep, isCtrlEnterKey, isEnterKey, isFollowKey, isHelpKey, isNewlineKey, isStatsKey, isTextInput, pastedText } from './keyEvents.ts'
 import { buildStatsRows, statsTotals, type StatsWindow } from '../stats/aggregate.ts'
 import type { AnalyticsHistory } from '../twitter/analytics.ts'
 import { createImageLayer, writeToTerminal, type ImagePlacement } from '../media/imageLayer.ts'
@@ -603,6 +603,41 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       rerender()
     }
 
+    // One account takes one call at a time, as one tweet does for a like. X gave the id, so
+    // an author it named no id for cannot be followed from here.
+    const followInFlight = new Set<string>()
+
+    const toggleFollow = async (): Promise<void> => {
+      const tweet = focusedTweet(state)
+      const author = tweet?.author
+      if (!tweet || !author?.id || followInFlight.has(author.id)) {
+        return
+      }
+      const userId = author.id
+      const following = !(relationOf(state, tweet)?.following ?? false)
+      followInFlight.add(userId)
+      state = { ...applyFollow(state, userId, following), status: following ? `following @${author.handle}` : `unfollowing @${author.handle}` }
+      rerender()
+      const result = await client.setFollow({
+        userId,
+        following,
+        onRetry: (notice) => {
+          state = { ...state, status: retryStatus('follow', notice) }
+          rerender()
+        }
+      })
+      followInFlight.delete(userId)
+      if (result.ok) {
+        state = { ...state, status: following ? `you now follow @${author.handle}` : `you no longer follow @${author.handle}` }
+        rerender()
+        return
+      }
+      await debugLogger.log('ui.follow.failed', { userId, handle: author.handle, following, error: result.error, code: result.code, logPath: debugLogger.path })
+      // X kept the old relationship, so the badge goes back to it rather than lie.
+      state = { ...applyFollow(state, userId, !following), status: `follow failed: ${result.error}; log: ${debugLogger.path}` }
+      rerender()
+    }
+
     const sendComposer = async (): Promise<void> => {
       const targetId = state.composer.targetTweetId
       const target = targetId ? state.tweets[targetId] : undefined
@@ -881,6 +916,10 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
       if (key.name === 'b') {
         void toggleBookmark()
+        return
+      }
+      if (isFollowKey(key)) {
+        void toggleFollow()
         return
       }
       // Ctrl+C quits through the renderer, so only the plain c opens the replies.

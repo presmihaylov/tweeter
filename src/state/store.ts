@@ -1,4 +1,4 @@
-import type { AppMedia, AppProfile, AppTweet, AppVideo, NotificationPage, NotificationRow } from '../twitter/types.ts'
+import type { AppMedia, AppProfile, AppTweet, AppVideo, NotificationPage, NotificationRow, UserRelation } from '../twitter/types.ts'
 import type { StatsRow, StatsTotals, StatsWindow } from '../stats/aggregate.ts'
 import { nextStatsWindow } from '../stats/aggregate.ts'
 
@@ -85,6 +85,10 @@ export type CaretMove = 'left' | 'right' | 'start' | 'end' | 'wordLeft' | 'wordR
 
 export type AppState = {
   tweets: Record<string, AppTweet>
+  // What stands between you and each account you have seen, keyed by user id. It sits here
+  // rather than on the tweet, because one account writes many tweets and a follow has to
+  // move all of their cards at once.
+  relations: Record<string, UserRelation>
   activeTab: TabId
   feedSort: FeedSort
   timelines: Record<TimelineId, TimelineState>
@@ -130,6 +134,7 @@ export type AppState = {
 
 export const initialAppState = (): AppState => ({
   tweets: {},
+  relations: {},
   activeTab: 'following',
   feedSort: 'recent',
   timelines: {
@@ -209,16 +214,55 @@ export const scrollHelp = (state: AppState, delta: number, max: number): AppStat
   return helpScroll === state.helpScroll ? state : { ...state, helpScroll }
 }
 
+// Only the flags X actually sent. A page that carries none must not erase what an earlier
+// page, or a follow of your own, already established.
+const relationFrom = (author: AppTweet['author']): UserRelation | undefined => {
+  const relation: UserRelation = {}
+  if (author.following !== undefined) {
+    relation.following = author.following
+  }
+  if (author.followedBy !== undefined) {
+    relation.followedBy = author.followedBy
+  }
+  return Object.keys(relation).length > 0 ? relation : undefined
+}
+
 export const mergeTweets = (state: AppState, tweets: AppTweet[]): AppState => {
   const nextTweets = { ...state.tweets }
-  for (const tweet of tweets) {
+  const relations = { ...state.relations }
+  const remember = (tweet: AppTweet): void => {
     nextTweets[tweet.id] = tweet
-    if (tweet.quotedTweet) {
-      nextTweets[tweet.quotedTweet.id] = tweet.quotedTweet
+    const relation = relationFrom(tweet.author)
+    const authorId = tweet.author.id
+    if (authorId !== undefined && relation) {
+      relations[authorId] = { ...relations[authorId], ...relation }
     }
   }
-  return { ...state, tweets: nextTweets }
+  for (const tweet of tweets) {
+    remember(tweet)
+    if (tweet.quotedTweet) {
+      remember(tweet.quotedTweet)
+    }
+  }
+  return { ...state, tweets: nextTweets, relations }
 }
+
+// The overlay answers first, because a follow moves it and not the copies the cards hold.
+// An author X gave no id for still has the flags that came with the tweet.
+export const relationOf = (state: AppState, tweet: AppTweet | undefined): UserRelation | undefined => {
+  if (!tweet) {
+    return undefined
+  }
+  const authorId = tweet.author.id
+  const kept = authorId === undefined ? undefined : state.relations[authorId]
+  return kept ?? relationFrom(tweet.author)
+}
+
+// The badge moves before X answers, the way the heart does on a like.
+export const applyFollow = (state: AppState, userId: string, following: boolean): AppState => ({
+  ...state,
+  relations: { ...state.relations, [userId]: { ...state.relations[userId], following } }
+})
 
 const withLike = (tweet: AppTweet, liked: boolean): AppTweet => ({
   ...tweet,

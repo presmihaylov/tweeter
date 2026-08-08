@@ -77,6 +77,7 @@ The card lays itself out for the window it opens in. It sits in the middle of th
 - `y` — copy the open tweet's link to your clipboard, to share it
 - `l` — like the open tweet, or take the like back
 - `b` — bookmark the open tweet, or take the bookmark off
+- `Shift+F` — follow the author of the open tweet, or unfollow them
 - `Shift+P` — write a new post; the same drawer opens with nothing behind it, `Enter` sends and `Esc` closes
 - `r` — reply to the open tweet; type, then `Enter` sends and `Esc` closes
 - `t` — repost the open tweet with your own words; the same drawer opens and posts a quote
@@ -203,6 +204,16 @@ Error 226 is the other refusal, and it is a different animal. It means the autom
 
 `b` bookmarks the open tweet and `b` again takes the bookmark off, through `CreateBookmark` and `DeleteBookmark`. It behaves like the like in every way that matters: optimistic, rolled back on refusal, one call per tweet at a time, and X's repeat codes counted as success in both directions (139 for a bookmark already there, 144 for one already gone). A bookmark is private, so the card only shows a `⚑` when you hold one and the counts line in the detail pane carries the number. `CreateBookmark` is stricter than the like endpoints in one way: it verifies `x-client-transaction-id` and answers a bad one with a bare 404, so a stale generator looks exactly like a dead query ID. The next section says how to tell them apart.
 
+## Following an account
+
+`Shift+F` follows the author of the open tweet, and `Shift+F` again unfollows them. The author block of the open tweet carries where you stand with that account, next to the handle: `✓ following` or `not following`, and `follows you` when they do. A relationship X said nothing about draws nothing, because an absent flag is not a no.
+
+The badge moves before X answers, the way the heart does on a like, and goes back to the old state when X refuses. One account takes one call at a time, so a fast double press cannot race itself, and X accepts a repeat of either direction without complaint. An author X named no user id for cannot be followed from here, since the id is what the call acts on.
+
+The relationship is kept once per account rather than once per tweet, in a map keyed by user id. One account writes many tweets, so a follow has to move every card of theirs at once, and a page that carries no flags must not erase what an earlier page already established. X sends the two facts as `relationship_perspectives` on the GraphQL user, and as plain `following` / `followed_by` fields on the old REST user the notifications tab reads.
+
+The follow is the other write X never moved to GraphQL. It is one form post to the old REST API, `friendships/create.json` or `friendships/destroy.json`, signed with the same cookies and the same `x-client-transaction-id` as every other write, and it answers with the account itself. A refusal carries its reason in the body the same way a GraphQL refusal does, so the same retry ladder covers it.
+
 X's automation check is the one thing that can break this without warning. A run of `error 226` that the ladder cannot outwait means one of two things. Either the gate is shut on the account for a while, which quiet time clears, or X tightened the heuristic and the headers no longer pass. The debug log tells them apart: `twitter.createTweet.refused` records `transactionIdSent`, so a false value points at the fingerprint. The fix for that is in `HeaderBuilder.baseHeaders` in `src/twitter/headers.ts`, which is the single place the browser fingerprint headers are set.
 
 One header is built per request rather than in `HeaderBuilder`: `x-client-transaction-id`. `src/twitter/transactionId.ts` derives it the way the x.com bundle does, because its value covers the request path and method. The bundle reads a 48-byte key from the `twitter-site-verification` meta tag of the signed-in shell, plays one of four hidden SVG loading animations at a frame the key picks, reads the resulting CSS `color` and `transform` back, and hashes that together with the path, the method and a timestamp counted from 2023-05-01. The result is 70 bytes, XOR-masked with a random first byte and base64-encoded. `PageContextStore` fetches the shell once per session and holds it, the way a browser tab holds one page load.
@@ -270,6 +281,7 @@ Implemented:
 - normalized state reducer/store helpers
 - `l` to like or unlike the open tweet, drawn as a filled `♥` on the count, applied optimistically and rolled back on refusal
 - `b` to bookmark or unbookmark the open tweet, drawn as a `⚑` on the card, applied the same way
+- `Shift+F` to follow or unfollow the author of the open tweet, through the old REST `friendships` endpoints, with `✓ following` / `not following` and `follows you` next to the handle
 - `Shift+P` writes a new post of your own, in the same drawer, with no tweet behind it
 - `Shift+Enter` (or `Alt+Enter`) starts a new line in the drawer, while `Enter` still sends
 - `y` copies the open tweet's link to the system clipboard, with a green note in the top right corner of the pane that goes on its own
@@ -281,7 +293,7 @@ Implemented:
 - `Enter` on a notification line that stands for a list, such as the bell line or an aggregated like, fetches that list and draws it as cards under the line
 - the unread badge from `badge_count.json` in the header, read only, so x.com stays the one thing that clears it
 - automatic retry with backoff on X's transient write refusal (error 344) and on its automation gate (error 226, up to 5 retries over 230s), for replies, likes and bookmarks
-- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, notifications, the tabs you add and the search behind them, the key popup and its reflow, the stats page and the analytics it reads, the cookie write path and its refusal codes, OAuth flow, media helpers
+- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, follows and the relationship badges, notifications, the tabs you add and the search behind them, the key popup and its reflow, the stats page and the analytics it reads, the cookie write path and its refusal codes, OAuth flow, media helpers
 
 Live X GraphQL endpoints can still break when operation IDs or response shapes change; query ID refresh and tests are set up to make those failures visible. Replies additionally depend on X's automation heuristic, which X can tighten at any time.
 

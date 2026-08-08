@@ -20,10 +20,14 @@ export type ArticleBlock =
 
 export type ArticleBody = { title: string; blocks?: ArticleBlock[] }
 
+// What X says stands between you and another account, from its own relationship_perspectives.
+// Absent means X did not say, which is not the same as a false.
+export type UserRelation = { following?: boolean; followedBy?: boolean }
+
 export type AppTweet = {
   id: string
   text: string
-  author: { id?: string; handle: string; name: string; avatarUrl?: string; verified?: boolean }
+  author: { id?: string; handle: string; name: string; avatarUrl?: string; verified?: boolean } & UserRelation
   createdAt?: string
   media: AppMedia[]
   metrics: { replies?: number; reposts?: number; likes?: number; quotes?: number; bookmarks?: number; views?: number }

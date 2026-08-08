@@ -1,6 +1,6 @@
 import { BoxRenderable, CliRenderEvents, TextRenderable, type CliRenderer, type Renderable } from '@opentui/core'
-import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, repliesOpen, replyIdsOf, searchQueryOf, tabOrder, type AppState, type ComposerMode, type ConversationState, type FeedSort, type NotificationsState, type TabId, type TimelineId } from '../state/store.ts'
-import type { AppMedia, AppNotice, AppTweet, AuthStatus, NoticeIcon, NotificationRow, WriteRetryNotice } from '../twitter/types.ts'
+import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, relationOf, repliesOpen, replyIdsOf, searchQueryOf, tabOrder, type AppState, type ComposerMode, type ConversationState, type FeedSort, type NotificationsState, type TabId, type TimelineId } from '../state/store.ts'
+import type { AppMedia, AppNotice, AppTweet, AuthStatus, NoticeIcon, NotificationRow, UserRelation, WriteRetryNotice } from '../twitter/types.ts'
 import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize, fitCells } from '../media/geometry.ts'
@@ -364,6 +364,7 @@ export const helpGroups: readonly HelpGroup[] = [
     entries: [
       { keys: 'l', what: 'like, or take the like back' },
       { keys: 'b', what: 'bookmark, or take it off' },
+      { keys: 'Shift+F', what: 'follow the author, or unfollow' },
       { keys: 'Shift+P', what: 'write a new post' },
       { keys: 'r', what: 'reply' },
       { keys: 't', what: 'repost with your own words' },
@@ -387,8 +388,7 @@ export const helpGroups: readonly HelpGroup[] = [
       { keys: 'Alt+← / Alt+→', what: 'jump a word' },
       { keys: 'Home / End', what: 'the two ends of the line' },
       { keys: 'Ctrl+A / Ctrl+E', what: 'the same two ends' },
-      { keys: 'Backspace', what: 'take the character before' },
-      { keys: 'Delete', what: 'take the character after' }
+      { keys: 'Backspace / Delete', what: 'take a character either side' }
     ]
   }
 ]
@@ -1612,7 +1612,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
         detailScroll = 0
       }
       detailAuthorName.content = focused ? `${focused.author.name}${focused.author.verified ? ' ✔' : ''}` : ''
-      detailAuthorHandle.content = focused ? `${articlePill(focused)}@${focused.author.handle}${postedPill(focused, now())}${focused.repostedBy ? `  ·  ↻ ${focused.repostedBy.name} reposted` : ''}` : ''
+      detailAuthorHandle.content = focused ? `${articlePill(focused)}@${focused.author.handle}${relationPills(relationOf(state, focused))}${postedPill(focused, now())}${focused.repostedBy ? `  ·  ↻ ${focused.repostedBy.name} reposted` : ''}` : ''
       detailAvatarSlot = focused?.author.avatarUrl
         ? { key: `avatar:detail:${focused.id}`, url: focused.author.avatarUrl, box: detailAvatar, pane: detailPane, width: 1, height: 1, minCols: avatarCols, minRows: avatarRows }
         : undefined
@@ -1856,6 +1856,20 @@ export const repostPill = (tweet: AppTweet): string =>
 // an ordinary tweet whose text happens to stop after the title. It goes in front of the
 // name, because a card line is narrow and a truncated line loses its end first.
 export const articlePill = (tweet: AppTweet | undefined): string => (tweet?.article ? '▤ article · ' : '')
+
+// Where you stand with the author, in the two facts x.com puts on a profile: whether you
+// follow them, and whether they follow you. A relationship X did not state says nothing
+// rather than guess, and it rides in front of the stamp because a cut line loses its end.
+export const relationPills = (relation: UserRelation | undefined): string => {
+  const said: string[] = []
+  if (relation?.following !== undefined) {
+    said.push(relation.following ? '✓ following' : 'not following')
+  }
+  if (relation?.followedBy === true) {
+    said.push('follows you')
+  }
+  return said.length === 0 ? '' : `  ·  ${said.join('  ·  ')}`
+}
 
 // The detail pane is wide, so the stamp rides on the line that already carries the handle.
 // A tweet X sent without a date says nothing rather than an empty separator.
