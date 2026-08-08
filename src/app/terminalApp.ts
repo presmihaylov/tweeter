@@ -10,10 +10,8 @@ import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
 import { caretMoveFor, cleanPasted, helpScrollStep, isCtrlEnterKey, isEnterKey, isHelpKey, isNewlineKey, isStatsKey, isTextInput, pastedText } from './keyEvents.ts'
-import { buildStatsRows, coveredFromOf, statsTotals, type StatsWindow } from '../stats/aggregate.ts'
-import { loadStatsTweets } from '../stats/load.ts'
-import { readFollowerLog, recordFollowers, writeFollowerLog, type FollowerLog } from '../stats/followerLog.ts'
-import type { FollowerHistory } from '../twitter/analytics.ts'
+import { buildStatsRows, statsTotals, type StatsWindow } from '../stats/aggregate.ts'
+import type { AnalyticsHistory } from '../twitter/analytics.ts'
 import { createImageLayer, writeToTerminal, type ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize } from '../media/geometry.ts'
 import { detectImageRenderer } from '../media/detect.ts'
@@ -271,55 +269,31 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
     }
 
-    // The stats page reads the profile timeline, which no pane asks for, so it keeps the
-    // pages it fetched to itself. A window inside the one already fetched is counted again
-    // from that cache rather than fetched a second time.
+    // The stats page reads X's own analytics, which no pane asks for, so it keeps the answer
+    // to itself. A window inside the one already fetched is drawn from that answer rather
+    // than fetched a second time.
     const userId = userIdFromCookies(profile.cookieHeader ?? '')
-    let statsCache: { tweets: AppTweet[]; profile?: AppProfile; window: StatsWindow; coveredFrom?: string; complete: boolean } | undefined
-    let followerLog: FollowerLog = {}
-    let followerHistory: FollowerHistory = {}
-    // Only the newest load may write to the page. A wider window asked for while the last
-    // one still pages would otherwise draw its own rows over the newer ones.
+    let statsCache: { history: AnalyticsHistory; profile?: AppProfile; window: StatsWindow } | undefined
+    // Only the newest load may write to the page. A wider window asked for while the last one
+    // is still in flight would otherwise draw its own rows over the newer ones.
     let statsRun = 0
     let statsInFlight: StatsWindow | undefined
 
-    const countStats = (cache: NonNullable<typeof statsCache>, window: StatsWindow, now: Date, more = false): void => {
-      const rows = buildStatsRows({ tweets: cache.tweets, userId: userId ?? '', window, now, followers: followerLog, followerHistory, coveredFrom: cache.coveredFrom })
-      state = mergeStats(state, { rows, totals: statsTotals(rows), profile: cache.profile, loadedWindow: cache.window, loading: more })
+    const countStats = (cache: NonNullable<typeof statsCache>, window: StatsWindow, now: Date): void => {
+      const rows = buildStatsRows({ window, now, history: cache.history })
+      state = mergeStats(state, { rows, totals: statsTotals(rows), profile: cache.profile, loadedWindow: cache.window, loading: false })
       rerender()
     }
 
-    const recountStats = (now: Date): void => {
-      const cache = statsCache
-      if (!cache || cache.window < state.stats.window) {
-        return
-      }
-      countStats(cache, state.stats.window, now, statsInFlight !== undefined)
-    }
-
-    // One request answers for the whole window, so it runs beside the timeline walk rather
-    // than after it. An account X refuses analytics for keeps the sampled counts instead.
-    const loadFollowerHistory = async (window: StatsWindow, now: Date, run: number): Promise<void> => {
+    // The analytics answer names no handle and counts no posts, so the head line still needs
+    // one page of the profile timeline. A page that fails costs the head line, not the table.
+    const statsProfile = async (id: string): Promise<AppProfile | undefined> => {
       try {
-        const history = await client.loadFollowerHistory({ days: window, now })
-        if (run !== statsRun) {
-          return
-        }
-        followerHistory = { ...followerHistory, ...history }
-        recountStats(now)
+        return (await client.loadUserTweetsPage({ userId: id, count: 20 })).profile
       } catch (error) {
-        await debugLogger.log('ui.stats.followerHistory.failed', { window, error: errorMessage(error) })
+        await debugLogger.log('ui.stats.profile.failed', { error: errorMessage(error) })
+        return undefined
       }
-    }
-
-    // X reports the follower count for right now, so every load writes it down. It is the
-    // fallback for an account whose analytics X will not serve.
-    const sampleFollowers = async (found: AppProfile | undefined, now: Date): Promise<void> => {
-      if (!found) {
-        return
-      }
-      followerLog = recordFollowers(followerLog, found.followers, now)
-      await writeFollowerLog(followerLog)
     }
 
     const loadStats = async (): Promise<void> => {
@@ -336,39 +310,17 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       rerender()
       try {
         const now = new Date()
-        followerLog = await readFollowerLog()
-        void loadFollowerHistory(window, now, run)
-        const load = await loadStatsTweets({
-          client,
-          userId,
-          window,
-          now,
-          onPage: (partial) => {
-            if (run !== statsRun) {
-              return
-            }
-            statsCache = {
-              tweets: partial.tweets,
-              profile: partial.profile,
-              window,
-              coveredFrom: coveredFromOf({ tweets: partial.tweets, userId, exhausted: partial.exhausted, now }),
-              complete: false
-            }
-            countStats(statsCache, window, now, true)
-          }
-        })
+        const [history, found] = await Promise.all([client.loadAnalytics({ days: window, now }), statsProfile(userId)])
         if (run !== statsRun) {
           return
         }
         statsInFlight = undefined
-        await sampleFollowers(load.profile, now)
-        statsCache = {
-          tweets: load.tweets,
-          profile: load.profile,
-          window,
-          coveredFrom: coveredFromOf({ tweets: load.tweets, userId, exhausted: load.exhausted, now }),
-          complete: true
+        if (Object.keys(history).length === 0) {
+          state = failStatsLoad(state, 'X served no analytics for this account')
+          rerender()
+          return
         }
+        statsCache = { history, profile: found, window }
         countStats(statsCache, window, now)
       } catch (error) {
         if (run !== statsRun) {
@@ -380,18 +332,16 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
     }
 
-    // A narrower window is already in what the wider one fetched, so only a wider one costs
-    // a request. A load that is still paging answers for its own window too: it goes on
-    // writing rows behind the page, so asking again would only fetch the same tweets twice.
+    // A narrower window is already in what the wider one fetched, so only a wider one costs a
+    // request.
     const showStats = async (): Promise<void> => {
       const window = state.stats.window
       const cache = statsCache
-      const running = statsInFlight !== undefined && statsInFlight >= window
-      if (cache && cache.window >= window && (cache.complete || running)) {
-        countStats(cache, window, new Date(), running)
+      if (cache && cache.window >= window) {
+        countStats(cache, window, new Date())
         return
       }
-      if (running) {
+      if (statsInFlight !== undefined && statsInFlight >= window) {
         return
       }
       await loadStats()

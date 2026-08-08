@@ -1,40 +1,39 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp } from 'node:fs/promises'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { createTestRenderer } from '@opentui/core/testing'
 import { isStatsKey } from '../src/app/keyEvents.ts'
-import { buildStatsRows, coveredFromOf, dayKey, dayLabel, nextStatsWindow, previousDay, recentDays, statsTotals } from '../src/stats/aggregate.ts'
-import { readFollowerLog, recordFollowers, writeFollowerLog } from '../src/stats/followerLog.ts'
-import { followerHistoryRange, followerHistoryVariables, parseFollowerHistory, utcDayKey } from '../src/twitter/analytics.ts'
-import { loadStatsTweets, statsPageCapFor, statsPageSize } from '../src/stats/load.ts'
+import { buildStatsRows, dayKey, dayLabel, nextStatsWindow, recentDays, statsTotals } from '../src/stats/aggregate.ts'
+import { analyticsRange, analyticsVariables, parseAnalytics, utcDayKey } from '../src/twitter/analytics.ts'
 import { formatChange, formatCount, statsBodyLines, statsHeadline, statsTableLines } from '../src/app/statsView.ts'
 import { createMainScreen, statsScrollMaxOf } from '../src/app/mainScreen.ts'
 import { getUserTimelineInstructions, parseTimelineProfile, parseUserTweets } from '../src/twitter/extract/tweet.ts'
 import { beginStatsLoad, closeStats, failStatsLoad, initialAppState, mergeStats, mergeTimelinePage, scrollStats, toggleHelp, toggleStats, turnStatsWindow } from '../src/state/store.ts'
+import type { AnalyticsDay, AnalyticsHistory } from '../src/twitter/analytics.ts'
 import type { AppKey } from '../src/app/keyEvents.ts'
-import type { AppProfile, AppTweet, UserTimelinePage } from '../src/twitter/types.ts'
+import type { AppProfile, AppTweet } from '../src/twitter/types.ts'
 
 const key = (over: Partial<AppKey>): AppKey => ({ name: '', ctrl: false, ...over })
 
 const me = 'u1'
 const now = new Date(2026, 7, 8, 10, 0, 0)
 
-// A day of the window, as a date X would stamp on a tweet.
-const stamp = (daysBack: number, hour = 12): string =>
-  new Date(2026, 7, 8 - daysBack, hour, 30, 0).toISOString()
-
 const mine = (id: string, over: Partial<AppTweet> = {}): AppTweet => ({
   id,
   text: `post ${id}`,
   author: { id: me, handle: 'me', name: 'Me' },
-  createdAt: stamp(0),
+  createdAt: new Date(2026, 7, 8, 12, 30, 0).toISOString(),
   media: [],
   metrics: { views: 100 },
   ...over
 })
 
 const profile: AppProfile = { id: me, handle: 'me', name: 'Me', followers: 1200, following: 300, posts: 4500 }
+
+const day = (over: Partial<AnalyticsDay> = {}): AnalyticsDay =>
+  ({ posts: 0, replies: 0, impressions: 0, follows: 0, unfollows: 0, ...over })
+
+// What X answered for, keyed by day, as the client hands it to the rows.
+const history = (days: Record<string, Partial<AnalyticsDay>>): AnalyticsHistory =>
+  Object.fromEntries(Object.entries(days).map(([key, value]) => [key, day(value)]))
 
 describe('the Shift+S key', () => {
   test('answers whichever shape the terminal sends', () => {
@@ -94,26 +93,18 @@ describe('the stats state', () => {
   })
 
   test('counted rows replace the last ones and name the window they cover', () => {
-    const rows = buildStatsRows({ tweets: [mine('1')], userId: me, window: 7, now })
+    const rows = buildStatsRows({ window: 7, now, history: history({ '2026-08-08': { posts: 1 } }) })
     const merged = mergeStats(beginStatsLoad(toggleStats(initialAppState())), { rows, totals: statsTotals(rows), profile, loadedWindow: 7 })
     expect(merged.stats.loading).toBe(false)
     expect(merged.stats.rows).toHaveLength(7)
     expect(merged.stats.loadedWindow).toBe(7)
     expect(merged.stats.profile?.followers).toBe(1200)
   })
-
-  test('a page that is not the last one leaves the load running', () => {
-    const rows = buildStatsRows({ tweets: [mine('1')], userId: me, window: 30, now, coveredFrom: '2026-08-05' })
-    const merged = mergeStats(beginStatsLoad(toggleStats(initialAppState())), { rows, totals: statsTotals(rows), loadedWindow: 30, loading: true })
-    expect(merged.stats.loading).toBe(true)
-    expect(merged.stats.rows).toHaveLength(30)
-  })
 })
 
 describe('the days', () => {
   test('a day is the day the machine is in', () => {
     expect(dayKey(new Date(2026, 7, 8, 1, 0, 0))).toBe('2026-08-08')
-    expect(previousDay('2026-08-01')).toBe('2026-07-31')
   })
 
   test('today says today, and every other day names itself', () => {
@@ -129,111 +120,45 @@ describe('the days', () => {
   })
 })
 
-describe('what the rows count', () => {
-  test('a post and a reply land in their own columns, on their own day', () => {
+describe('what the rows say', () => {
+  test('each day carries the four numbers X counted for it', () => {
     const rows = buildStatsRows({
-      tweets: [
-        mine('1', { metrics: { views: 900 } }),
-        mine('2', { inReplyToStatusId: '99', metrics: { views: 100 } }),
-        mine('3', { createdAt: stamp(1), metrics: { views: 40 } })
-      ],
-      userId: me,
       window: 7,
-      now
+      now,
+      history: history({
+        '2026-08-08': { posts: 3, replies: 20, impressions: 2642, follows: 4, unfollows: 1 },
+        '2026-08-07': { posts: 7, replies: 70, impressions: 11624, follows: 6, unfollows: 1 }
+      })
     })
-    expect(rows[0]).toMatchObject({ day: '2026-08-08', posts: 1, replies: 1, impressions: 1000 })
-    expect(rows[1]).toMatchObject({ day: '2026-08-07', posts: 1, replies: 0, impressions: 40 })
+    expect(rows[0]).toMatchObject({ day: '2026-08-08', posts: 3, replies: 20, impressions: 2642, followerChange: 3, covered: true })
+    expect(rows[1]).toMatchObject({ day: '2026-08-07', posts: 7, replies: 70, impressions: 11624, followerChange: 5 })
   })
 
-  test('somebody else\'s tweet and your own repost of one are not yours to count', () => {
-    const rows = buildStatsRows({
-      tweets: [
-        mine('1'),
-        { ...mine('2'), author: { id: 'u2', handle: 'other', name: 'Other' } },
-        mine('3', { repostedBy: { handle: 'me', name: 'Me' } })
-      ],
-      userId: me,
-      window: 7,
-      now
-    })
-    expect(rows[0]).toMatchObject({ posts: 1, impressions: 100 })
-  })
-
-  test('a tweet older than the window falls outside the rows', () => {
-    const rows = buildStatsRows({ tweets: [mine('1', { createdAt: stamp(20) })], userId: me, window: 7, now })
-    expect(statsTotals(rows).posts).toBe(0)
-  })
-
-  test('the total adds every row it was given', () => {
-    const rows = buildStatsRows({
-      tweets: [mine('1'), mine('2', { createdAt: stamp(3), inReplyToStatusId: '9' }), mine('3', { createdAt: stamp(3) })],
-      userId: me,
-      window: 7,
-      now
-    })
-    expect(statsTotals(rows)).toMatchObject({ posts: 2, replies: 1, impressions: 300 })
-  })
-
-  test('a day the fetch never reached reads as unknown, not as zero', () => {
-    const rows = buildStatsRows({ tweets: [mine('1')], userId: me, window: 7, now, coveredFrom: '2026-08-06' })
+  test('a day X answered nothing for reads as unknown, not as a quiet day', () => {
+    const rows = buildStatsRows({ window: 7, now, history: history({ '2026-08-08': { posts: 1 } }) })
     expect(rows[0]?.covered).toBe(true)
-    expect(rows[2]?.covered).toBe(true)
-    expect(rows[3]?.covered).toBe(false)
-  })
-
-  test('the covered day is the oldest one fetched, and everything when the timeline ran out', () => {
-    const tweets = [mine('1'), mine('2', { createdAt: stamp(4) })]
-    expect(coveredFromOf({ tweets, userId: me, exhausted: false, now })).toBe('2026-08-04')
-    expect(coveredFromOf({ tweets, userId: me, exhausted: true, now })).toBeUndefined()
-  })
-})
-
-describe('the follower change', () => {
-  test('a day names a change only when the day before was counted too', () => {
-    const followers = { '2026-08-08': 1210, '2026-08-07': 1200 }
-    const rows = buildStatsRows({ tweets: [], userId: me, window: 7, now, followers })
-    expect(rows[0]?.followerChange).toBe(10)
+    expect(rows[1]?.covered).toBe(false)
     expect(rows[1]?.followerChange).toBeUndefined()
   })
 
-  test('a lost follower reads as a loss', () => {
-    const followers = { '2026-08-08': 1190, '2026-08-07': 1200, '2026-08-06': 1150 }
-    const rows = buildStatsRows({ tweets: [], userId: me, window: 7, now, followers })
-    expect(rows[0]?.followerChange).toBe(-10)
-    expect(rows[1]?.followerChange).toBe(50)
-    expect(statsTotals(rows).followerChange).toBe(40)
-  })
-
-  test('no sample at all leaves the total without a change', () => {
-    expect(statsTotals(buildStatsRows({ tweets: [], userId: me, window: 7, now })).followerChange).toBeUndefined()
-  })
-
-  test('what X counted beats the samples taken here', () => {
+  test('the total adds the days X answered for and leaves the rest out', () => {
     const rows = buildStatsRows({
-      tweets: [],
-      userId: me,
       window: 7,
       now,
-      followers: { '2026-08-08': 1210, '2026-08-07': 1200 },
-      followerHistory: { '2026-08-08': { follows: 30, unfollows: 4 } }
+      history: history({
+        '2026-08-08': { posts: 2, replies: 5, impressions: 100, follows: 3, unfollows: 1 },
+        '2026-08-06': { posts: 1, replies: 2, impressions: 50, follows: 0, unfollows: 4 }
+      })
     })
-    expect(rows[0]?.followerChange).toBe(26)
+    expect(statsTotals(rows)).toEqual({ posts: 3, replies: 7, impressions: 150, followerChange: -2 })
   })
 
-  test('a day X says nothing about falls back to the samples', () => {
-    const rows = buildStatsRows({
-      tweets: [],
-      userId: me,
-      window: 7,
-      now,
-      followers: { '2026-08-08': 1210, '2026-08-07': 1200 },
-      followerHistory: { '2026-08-06': { follows: 1, unfollows: 0 } }
-    })
-    expect(rows[0]?.followerChange).toBe(10)
+  test('an empty answer leaves the total without numbers to add', () => {
+    expect(statsTotals(buildStatsRows({ window: 7, now, history: {} })).followerChange).toBeUndefined()
   })
 })
 
-describe('the follower history X counts itself', () => {
+describe('the analytics X serves', () => {
   const analyticsBody = (series: unknown[], backfill: unknown[] = []): unknown => ({
     data: { viewer_v2: { user_results: { result: { current_time_series: series, hourly_backfill: backfill } } } }
   })
@@ -246,7 +171,7 @@ describe('the follower history X counts itself', () => {
   })
 
   test('the window ends after today and runs back the days it asks for', () => {
-    const variables = followerHistoryVariables(new Date('2026-08-08T10:00:00Z'), 7)
+    const variables = analyticsVariables(new Date('2026-08-08T10:00:00Z'), 7)
     expect(variables.current_to_iso).toBe('2026-08-09T00:00:00.000Z')
     expect(variables.current_from_iso).toBe('2026-08-02T00:00:00.000Z')
     expect(variables.prev_from_iso).toBe('2026-07-26T00:00:00.000Z')
@@ -255,13 +180,13 @@ describe('the follower history X counts itself', () => {
 
   // The daily series lags about two days, so the second series has to reach yesterday.
   test('the finer series covers yesterday and today', () => {
-    const variables = followerHistoryVariables(new Date('2026-08-08T10:00:00Z'), 7)
+    const variables = analyticsVariables(new Date('2026-08-08T10:00:00Z'), 7)
     expect(new Date(Number(variables.backfill_from)).toISOString()).toBe('2026-08-07T00:00:00.000Z')
     expect(new Date(Number(variables.backfill_to)).toISOString()).toBe('2026-08-09T00:00:00.000Z')
   })
 
   test('every day of the window is named, oldest first', () => {
-    const days = followerHistoryRange(new Date('2026-08-08T10:00:00Z'), 7)
+    const days = analyticsRange(new Date('2026-08-08T10:00:00Z'), 7)
     expect(days).toHaveLength(7)
     expect(days[0]).toBe('2026-08-02')
     expect(days.at(-1)).toBe('2026-08-08')
@@ -271,161 +196,53 @@ describe('the follower history X counts itself', () => {
     expect(utcDayKey(Date.parse('2026-08-08T23:30:00Z'))).toBe('2026-08-08')
   })
 
-  test('follows and unfollows come together, and the other kinds stay out', () => {
-    const history = parseFollowerHistory(analyticsBody([
-      row('Follow', 12, '2026-08-05T00:00:00Z'),
-      row('Unfollow', 5, '2026-08-05T00:00:00Z'),
-      row('Displayed', 9000, '2026-08-05T00:00:00Z')
+  // The names are X's own: a quote counts as a post, and a reply is one you wrote, while the
+  // Reply it also counts is a reply somebody left you.
+  test('each kind of engagement lands in the column x.com puts it in', () => {
+    const parsed = parseAnalytics(analyticsBody([
+      row('TweetCreate', 7, '2026-08-05T00:00:00Z'),
+      row('QuoteCreate', 4, '2026-08-05T00:00:00Z'),
+      row('ReplyCreate', 70, '2026-08-05T00:00:00Z'),
+      row('Displayed', 11624, '2026-08-05T00:00:00Z'),
+      row('Follow', 6, '2026-08-05T00:00:00Z'),
+      row('Unfollow', 1, '2026-08-05T00:00:00Z'),
+      row('Reply', 42, '2026-08-05T00:00:00Z'),
+      row('Fav', 78, '2026-08-05T00:00:00Z')
     ]))
-    expect(history['2026-08-05']).toEqual({ follows: 12, unfollows: 5 })
+    expect(parsed['2026-08-05']).toEqual({ posts: 11, replies: 70, impressions: 11624, follows: 6, unfollows: 1 })
   })
 
-  test('the finer series adds to the days the daily one already has', () => {
-    const history = parseFollowerHistory(
-      analyticsBody([row('Follow', 2, '2026-08-08T00:00:00Z')], [row('Follow', 3, '2026-08-08T06:00:00Z')])
-    )
-    expect(history['2026-08-08']).toEqual({ follows: 5, unfollows: 0 })
+  // The daily series runs two days behind, and the finer one fills that tail in.
+  test('the finer series answers for the days the daily one has not reached', () => {
+    const parsed = parseAnalytics(analyticsBody(
+      [row('Displayed', 300, '2026-08-06T00:00:00Z')],
+      [row('Displayed', 900, '2026-08-07T00:00:00Z'), row('ReplyCreate', 70, '2026-08-07T00:00:00Z')]
+    ))
+    expect(parsed['2026-08-07']).toMatchObject({ impressions: 900, replies: 70 })
+    expect(parsed['2026-08-06']).toMatchObject({ impressions: 300 })
+  })
+
+  // x.com replaces the tail rather than adding to it, and stops at the newest day the daily
+  // series already answered for, so a day both series carry is counted once.
+  test('a day both series carry is not counted twice', () => {
+    const parsed = parseAnalytics(analyticsBody(
+      [row('Displayed', 300, '2026-08-07T00:00:00Z')],
+      [row('Displayed', 900, '2026-08-07T00:00:00Z')]
+    ))
+    expect(parsed['2026-08-07']).toMatchObject({ impressions: 300 })
   })
 
   // X sends no row for a quiet day, and a quiet day is not an unknown day.
-  test('a day nobody followed or left reads as zero', () => {
-    const history = parseFollowerHistory(analyticsBody([]), ['2026-08-07', '2026-08-08'])
-    expect(history['2026-08-07']).toEqual({ follows: 0, unfollows: 0 })
+  test('a day with nothing on it reads as zero', () => {
+    const parsed = parseAnalytics(analyticsBody([row('Displayed', 5, '2026-08-08T00:00:00Z')]), ['2026-08-06', '2026-08-07', '2026-08-08'])
+    expect(parsed['2026-08-06']).toEqual({ posts: 0, replies: 0, impressions: 0, follows: 0, unfollows: 0 })
   })
 
-  test('an answer X refuses leaves the history empty, so the samples still speak', () => {
-    expect(parseFollowerHistory({ data: {} }, ['2026-08-08'])).toEqual({})
-  })
-})
-
-describe('the follower log', () => {
-  const logPath = async (): Promise<string> => join(await mkdtemp(join(tmpdir(), 'tweeter-stats-')), 'followers.json')
-
-  test('a missing file is an empty log, not an error', async () => {
-    expect(await readFollowerLog(await logPath())).toEqual({})
-  })
-
-  test('what one run wrote the next run reads', async () => {
-    const path = await logPath()
-    await writeFollowerLog(recordFollowers({}, 1200, now), path)
-    expect(await readFollowerLog(path)).toEqual({ '2026-08-08': 1200 })
-  })
-
-  test('the last count of the day wins', () => {
-    const log = recordFollowers(recordFollowers({}, 1200, now), 1205, new Date(2026, 7, 8, 22, 0, 0))
-    expect(log['2026-08-08']).toBe(1205)
-  })
-
-  test('a count older than the file keeps is dropped', () => {
-    const log = recordFollowers({ '2026-01-01': 900, '2026-08-07': 1190 }, 1200, now)
-    expect(log['2026-01-01']).toBeUndefined()
-    expect(log['2026-08-07']).toBe(1190)
-  })
-
-  test('a file that is not a log of numbers reads as empty', async () => {
-    const path = await logPath()
-    await Bun.write(path, JSON.stringify({ '2026-08-08': 'many', '2026-08-07': 1190 }))
-    expect(await readFollowerLog(path)).toEqual({ '2026-08-07': 1190 })
-  })
-})
-
-describe('the fetch behind the page', () => {
-  const pageOf = (tweets: AppTweet[], bottomCursor?: string): UserTimelinePage => ({ tweets, profile, bottomCursor })
-
-  test('it stops as soon as one page reaches past the window', async () => {
-    const asked: Array<string | undefined> = []
-    const load = await loadStatsTweets({
-      client: {
-        loadUserTweetsPage: async (args) => {
-          asked.push(args.cursor)
-          expect(args.count).toBe(statsPageSize)
-          return asked.length === 1
-            ? pageOf([mine('1'), mine('2', { createdAt: stamp(3) })], 'c1')
-            : pageOf([mine('3', { createdAt: stamp(9) })], 'c2')
-        }
-      },
-      userId: me,
-      window: 7,
-      now
-    })
-    expect(asked).toEqual([undefined, 'c1'])
-    expect(load.tweets).toHaveLength(3)
-    expect(load.profile?.handle).toBe('me')
-    expect(load.exhausted).toBe(false)
-  })
-
-  test('a timeline that runs out covers every day of the window', async () => {
-    const load = await loadStatsTweets({
-      client: { loadUserTweetsPage: async () => pageOf([mine('1')]) },
-      userId: me,
-      window: 30,
-      now
-    })
-    expect(load.exhausted).toBe(true)
-    expect(load.pages).toBe(1)
-  })
-
-  test('it gives up rather than page back through a whole history', async () => {
-    const load = await loadStatsTweets({
-      client: { loadUserTweetsPage: async () => pageOf([mine('1')], 'more') },
-      userId: me,
-      window: 30,
-      now,
-      pageCap: 3
-    })
-    expect(load.pages).toBe(3)
-    expect(load.exhausted).toBe(false)
-  })
-
-  test('a wider window may walk further back', () => {
-    expect(statsPageCapFor(7)).toBe(14)
-    expect(statsPageCapFor(14)).toBe(28)
-    expect(statsPageCapFor(30)).toBe(60)
-  })
-
-  test('every page is handed over as it lands, so the table fills in', async () => {
-    const seen: number[] = []
-    await loadStatsTweets({
-      client: {
-        loadUserTweetsPage: async () => (seen.length < 2 ? pageOf([mine('1')], 'c1') : pageOf([mine('2', { createdAt: stamp(9) })], 'c2'))
-      },
-      userId: me,
-      window: 7,
-      now,
-      onPage: (partial) => { seen.push(partial.tweets.length) }
-    })
-    expect(seen).toEqual([1, 2, 3])
-  })
-
-  test('a page handed over is a copy, so a later page cannot change it', async () => {
-    const seen: AppTweet[][] = []
-    await loadStatsTweets({
-      client: {
-        loadUserTweetsPage: async () => (seen.length < 1 ? pageOf([mine('1')], 'c1') : pageOf([mine('2', { createdAt: stamp(9) })], 'c2'))
-      },
-      userId: me,
-      window: 7,
-      now,
-      onPage: (partial) => { seen.push(partial.tweets) }
-    })
-    expect(seen[0]).toHaveLength(1)
-  })
-
-  test('a page of nobody else\'s tweets does not end the walk', async () => {
-    let pages = 0
-    const load = await loadStatsTweets({
-      client: {
-        loadUserTweetsPage: async () => {
-          pages += 1
-          const old = { ...mine('x'), author: { id: 'u2', handle: 'other', name: 'Other' }, createdAt: stamp(40) }
-          return pages === 1 ? pageOf([old], 'c1') : pageOf([mine('2', { createdAt: stamp(40) })], 'c2')
-        }
-      },
-      userId: me,
-      window: 7,
-      now
-    })
-    expect(load.pages).toBe(2)
+  // X serves no analytics for a young account, and a page of zeros would read as a quiet
+  // month rather than as an answer nobody gave.
+  test('an answer with no series in it stays empty', () => {
+    expect(parseAnalytics(analyticsBody([]), ['2026-08-08'])).toEqual({})
+    expect(parseAnalytics({ data: {} }, ['2026-08-08'])).toEqual({})
   })
 })
 
@@ -487,8 +304,6 @@ describe('what the profile timeline gives back', () => {
     expect(parseTimelineProfile(getUserTimelineInstructions(body(newShape)), 'u2')).toBeUndefined()
   })
 
-  // The pin is out of order, so counting it would tell the walk it had reached back further
-  // than it has, and the oldest days would be left empty.
   test('the pinned tweet stays out of the list', () => {
     expect(parseUserTweets(getUserTimelineInstructions(body(newShape))).map((tweet) => tweet.id)).toEqual(['1'])
   })
@@ -496,12 +311,14 @@ describe('what the profile timeline gives back', () => {
 
 describe('the table', () => {
   const rows = buildStatsRows({
-    tweets: [mine('1', { metrics: { views: 12345 } }), mine('2', { createdAt: stamp(1), inReplyToStatusId: '9', metrics: { views: 6 } })],
-    userId: me,
     window: 7,
     now,
-    followers: { '2026-08-08': 1210, '2026-08-07': 1200 },
-    coveredFrom: '2026-08-05'
+    history: history({
+      '2026-08-08': { posts: 1, replies: 0, impressions: 12345, follows: 12, unfollows: 2 },
+      '2026-08-07': { posts: 0, replies: 1, impressions: 6, follows: 0, unfollows: 0 },
+      '2026-08-06': { posts: 0, replies: 0, impressions: 0, follows: 0, unfollows: 0 },
+      '2026-08-05': { posts: 0, replies: 0, impressions: 0, follows: 0, unfollows: 0 }
+    })
   })
 
   test('a count reads as a count and a change reads as a change', () => {
@@ -527,7 +344,7 @@ describe('the table', () => {
     }
   })
 
-  test('a day nobody fetched shows no numbers to read', () => {
+  test('a day X answered nothing for shows no numbers to read', () => {
     const lines = statsTableLines(rows, statsTotals(rows), now)
     expect(lines[1]).toContain('Today')
     expect(lines[1]).toContain('12,345')
@@ -535,12 +352,12 @@ describe('the table', () => {
     expect(lines.at(-1)).toContain('Total')
   })
 
-  test('the head names the account and the note names what the numbers mean', () => {
+  test('the head names the account and the note names where the numbers come from', () => {
     const body = statsBodyLines({ rows, totals: statsTotals(rows), profile, window: 14, loading: false, now })
     expect(body[0]).toContain('@me')
     expect(body[0]).toContain('1,200 followers')
-    expect(body.join('\n')).toContain('Impressions are the views so far')
-    expect(body.join('\n')).toContain('follows minus unfollows')
+    expect(body.join('\n')).toContain('Impressions are the views everything of yours drew')
+    expect(body.join('\n')).toContain('X counts its days in UTC')
   })
 
   test('a window with no account behind it still says which window it is', () => {
@@ -554,13 +371,13 @@ describe('the table', () => {
   })
 
   test('a load that is still running says so', () => {
-    expect(statsBodyLines({ rows: [], window: 7, loading: true, now }).join('\n')).toContain('Counting')
+    expect(statsBodyLines({ rows: [], window: 7, loading: true, now }).join('\n')).toContain('Reading your stats')
   })
 })
 
 describe('the page on the screen', () => {
   const stateWith = (over: Partial<ReturnType<typeof initialAppState>['stats']>) => {
-    const rows = buildStatsRows({ tweets: [mine('1', { metrics: { views: 4321 } })], userId: me, window: 7, now })
+    const rows = buildStatsRows({ window: 7, now, history: history({ '2026-08-08': { impressions: 4321 } }) })
     const loaded = mergeTimelinePage(initialAppState(), 'following', [mine('1')], {})
     return { ...loaded, stats: { ...loaded.stats, open: true, rows, totals: statsTotals(rows), profile, ...over } }
   }
@@ -611,7 +428,7 @@ describe('the page on the screen', () => {
 
   // A window too short for thirty days has to scroll, and say that it does.
   test('a short window scrolls the days it cannot hold', async () => {
-    const rows = buildStatsRows({ tweets: [], userId: me, window: 30, now })
+    const rows = buildStatsRows({ window: 30, now, history: {} })
     const tall = statsBodyLines({ rows, totals: statsTotals(rows), profile, window: 30, loading: false, now })
     expect(statsScrollMaxOf(tall, 20)).toBeGreaterThan(0)
     expect(statsScrollMaxOf(tall, 60)).toBe(0)

@@ -173,7 +173,7 @@ describe('TwitterClient read paths', () => {
     expect(captured[2]?.variables).not.toHaveProperty('enableRanking')
   })
 
-  test('reads the follower history from the analytics query', async () => {
+  test('reads the day counts from the analytics query', async () => {
     const asked: URL[] = []
     const fetchMock = async (input: RequestInfo | URL): Promise<Response> => {
       const url = new URL(input.toString())
@@ -188,7 +188,9 @@ describe('TwitterClient read paths', () => {
               result: {
                 current_time_series: [
                   { engagement_type: 'Follow', count: 7, timestamp: Date.parse('2026-08-04T00:00:00Z') },
-                  { engagement_type: 'Unfollow', count: 2, timestamp: Date.parse('2026-08-04T00:00:00Z') }
+                  { engagement_type: 'Unfollow', count: 2, timestamp: Date.parse('2026-08-04T00:00:00Z') },
+                  { engagement_type: 'ReplyCreate', count: 70, timestamp: Date.parse('2026-08-04T00:00:00Z') },
+                  { engagement_type: 'Displayed', count: 11624, timestamp: Date.parse('2026-08-04T00:00:00Z') }
                 ],
                 hourly_backfill: []
               }
@@ -198,14 +200,13 @@ describe('TwitterClient read paths', () => {
       })
     }
     const client = new TwitterClient({ authToken: 'auth', ct0: 'csrf', fetch: fetchMock, graphQLBase: 'https://x.com/i/api/graphql' })
-    const history = await client.loadFollowerHistory({ days: 7, now: new Date('2026-08-08T10:00:00Z') })
+    const history = await client.loadAnalytics({ days: 7, now: new Date('2026-08-08T10:00:00Z') })
     expect(asked).toHaveLength(1)
     expect(asked[0]?.searchParams.get('features')).toBe('{}')
-    expect(history['2026-08-04']).toEqual({ follows: 7, unfollows: 2 })
-    expect(history['2026-08-03']).toEqual({ follows: 0, unfollows: 0 })
+    expect(history['2026-08-04']).toEqual({ posts: 0, replies: 70, impressions: 11624, follows: 7, unfollows: 2 })
+    expect(history['2026-08-03']?.impressions).toBe(0)
     // A day more than the rows ask for, because a local day can sit outside the UTC window.
     expect(Object.keys(history)).toHaveLength(8)
-    expect(history['2026-08-01']).toEqual({ follows: 0, unfollows: 0 })
   })
 
   test('keeps Discover more tweets and injected ads out of the replies', async () => {

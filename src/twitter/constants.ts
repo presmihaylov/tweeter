@@ -17,13 +17,13 @@ export const fallbackQueryIds: Readonly<Record<string, string>> = {
   accountOverviewDailyQuery: '_P1caq0YB4SVuEtFLPDMfQ'
 }
 
-// The one read the stats page makes for follower history. x.com draws that page from a
-// chunk it loads only when you open it, so the id is in neither the main nor the vendor
-// bundle: discovery has to build the chunk URL out of the shell's own chunk map.
-export const followerHistoryOperation = 'accountOverviewDailyQuery'
+// The one read the stats page makes. x.com draws its own analytics page from a chunk it
+// loads only when you open it, so the id is in neither the main nor the vendor bundle:
+// discovery has to build the chunk URL out of the shell's own chunk map.
+export const analyticsOperation = 'accountOverviewDailyQuery'
 
 export const lazyChunkOperations: Readonly<Record<string, string>> = {
-  [followerHistoryOperation]: 'bundle.AccountAnalytics'
+  [analyticsOperation]: 'bundle.AccountAnalytics'
 }
 
 export const tweetTextLimit = 280

@@ -1,24 +1,29 @@
 import { getInt, getMap, getSlice, getStr } from '../utils/guards.ts'
 
-// What X counted for one day: people who followed and people who left. The page shows the
-// difference, but both halves are worth keeping, because a flat day and a busy day that
-// cancels out are not the same day.
-export type FollowerDay = { follows: number; unfollows: number }
+// One day of x.com's own account analytics. A post is a tweet or a quote, a reply is one you
+// wrote, and an impression is a view of anything of yours, an old post as much as a new one.
+export type AnalyticsDay = {
+  posts: number
+  replies: number
+  impressions: number
+  follows: number
+  unfollows: number
+}
 
-// Keyed by calendar day, the way the rows are. X buckets these in UTC, and so does its own
-// analytics page, so the key is the UTC date of the bucket.
-export type FollowerHistory = Record<string, FollowerDay>
+// Keyed by calendar day. X buckets these in UTC, and so do its own analytics page and the CSV
+// that page exports, so the key is the UTC date of the bucket.
+export type AnalyticsHistory = Record<string, AnalyticsDay>
 
 const dayMs = 86_400_000
 
 const utcMidnight = (date: Date): number => Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
 
-export const followerHistoryVariables = (now: Date, days: number): Record<string, unknown> => {
+export const analyticsVariables = (now: Date, days: number): Record<string, unknown> => {
   const to = utcMidnight(now) + dayMs
   const from = to - days * dayMs
   const previousFrom = from - (to - from)
-  // The daily series stops about two days short of now, so x.com asks a second, finer
-  // series for the tail. Yesterday and today come from that one.
+  // The daily series stops about two days short of now, so x.com asks a second, finer series
+  // for the tail. Yesterday and today come from that one.
   const backfillFrom = utcMidnight(now) - dayMs
   return {
     backfill_from: backfillFrom,
@@ -35,9 +40,9 @@ export const followerHistoryVariables = (now: Date, days: number): Record<string
   }
 }
 
-// Every day the request asked about, oldest first. A day X sends nothing for is a day with
-// no follows and no unfollows, and that is a zero rather than a blank.
-export const followerHistoryRange = (now: Date, days: number): string[] => {
+// Every day the request asked about, oldest first. A day X sends nothing for is a quiet day
+// rather than an unknown one, so it has to be named here to come back as a row of zeros.
+export const analyticsRange = (now: Date, days: number): string[] => {
   const to = utcMidnight(now) + dayMs
   const keys: string[] = []
   for (let back = days; back > 0; back -= 1) {
@@ -53,31 +58,72 @@ export const utcDayKey = (ms: number): string => {
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`
 }
 
-// Both series carry every kind of engagement in one flat list, one row per day per kind.
-// Only two kinds move the follower count.
-export const parseFollowerHistory = (body: unknown, days: string[] = []): FollowerHistory => {
+const emptyDay = (): AnalyticsDay => ({ posts: 0, replies: 0, impressions: 0, follows: 0, unfollows: 0 })
+
+// What each kind of engagement adds to, taken from the map the analytics page itself uses. X
+// counts dozens of other kinds, and they are about what people did to your posts rather than
+// about the four numbers this page shows. A quote counts as a post, the way x.com counts it.
+const fieldOfKind: Readonly<Record<string, keyof AnalyticsDay>> = {
+  TweetCreate: 'posts',
+  QuoteCreate: 'posts',
+  ReplyCreate: 'replies',
+  Displayed: 'impressions',
+  Follow: 'follows',
+  Unfollow: 'unfollows'
+}
+
+const dayOfRows = (rows: unknown[]): AnalyticsDay => {
+  const day = emptyDay()
+  for (const row of rows) {
+    const field = fieldOfKind[getStr(row, 'engagement_type')]
+    if (field) {
+      day[field] += getInt(row, 'count')
+    }
+  }
+  return day
+}
+
+const byDay = (rows: unknown[]): Record<string, unknown[]> => {
+  const groups: Record<string, unknown[]> = {}
+  for (const row of rows) {
+    const timestamp = getInt(row, 'timestamp')
+    if (timestamp === 0) {
+      continue
+    }
+    const group = groups[utcDayKey(timestamp)] ?? []
+    group.push(row)
+    groups[utcDayKey(timestamp)] = group
+  }
+  return groups
+}
+
+// Both series carry every kind of engagement in one flat list, one row per day per kind. An
+// empty answer stays empty: X serves no analytics for a young account, and a page of zeros
+// would read as a quiet month rather than as an answer nobody gave.
+export const parseAnalytics = (body: unknown, days: string[] = []): AnalyticsHistory => {
   const result = getMap(getMap(getMap(getMap(body, 'data'), 'viewer_v2'), 'user_results'), 'result')
-  if (!result) {
+  const current = byDay(getSlice(result, 'current_time_series') ?? [])
+  const backfill = byDay(getSlice(result, 'hourly_backfill') ?? [])
+  if (Object.keys(current).length === 0 && Object.keys(backfill).length === 0) {
     return {}
   }
-  const history: FollowerHistory = {}
-  for (const day of days) {
-    history[day] = { follows: 0, unfollows: 0 }
+  const history: AnalyticsHistory = {}
+  for (const day of [...days, ...Object.keys(current), ...Object.keys(backfill)]) {
+    history[day] = emptyDay()
   }
-  for (const field of ['current_time_series', 'hourly_backfill']) {
-    for (const entry of getSlice(result, field) ?? []) {
-      const kind = getStr(entry, 'engagement_type')
-      const timestamp = getInt(entry, 'timestamp')
-      if ((kind !== 'Follow' && kind !== 'Unfollow') || timestamp === 0) {
-        continue
-      }
-      const day = utcDayKey(timestamp)
-      const before = history[day] ?? { follows: 0, unfollows: 0 }
-      const count = getInt(entry, 'count')
-      history[day] = {
-        follows: before.follows + (kind === 'Follow' ? count : 0),
-        unfollows: before.unfollows + (kind === 'Unfollow' ? count : 0)
-      }
+  for (const [day, rows] of Object.entries(current)) {
+    history[day] = dayOfRows(rows)
+  }
+  // The finer series replaces the tail rather than adding to it, and the tail ends at the
+  // newest day the daily series already has impressions for. That is what x.com does, and it
+  // is what keeps a day both series speak for from being counted twice.
+  for (const day of Object.keys(history).sort().reverse()) {
+    if ((history[day]?.impressions ?? 0) > 0) {
+      break
+    }
+    const rows = backfill[day]
+    if (rows) {
+      history[day] = dayOfRows(rows)
     }
   }
   return history

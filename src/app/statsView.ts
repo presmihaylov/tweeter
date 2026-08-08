@@ -56,11 +56,11 @@ export const statsHeadline = (profile: AppProfile | undefined, window: StatsWind
   return `@${profile.handle} · ${formatCount(profile.followers)} followers · ${formatCount(profile.following)} following · ${formatCount(profile.posts)} posts`
 }
 
-// What the numbers do and do not mean. The two columns come from two different reads, so
-// the page says where each one comes from rather than letting the reader assume.
+// Where the numbers come from and which day they belong to, so the reader does not have to
+// guess why a row here and a row on x.com can sit a few hours apart.
 export const statsNotes = (): string[] => [
-  'Impressions are the views so far on what you wrote that day.',
-  'A follower change is what X counted: follows minus unfollows, in UTC days.'
+  'Impressions are the views everything of yours drew that day, older posts included.',
+  'The numbers are X\'s own, from its analytics page, and X counts its days in UTC.'
 ]
 
 export const statsBodyLines = (args: {
@@ -75,11 +75,10 @@ export const statsBodyLines = (args: {
   const { rows, totals, profile, window, loading, error, now } = args
   const head = [statsHeadline(profile, window), '']
   if (error !== undefined) {
-    return [...head, `Could not read your profile timeline: ${error}`, '', 'R tries again.']
+    return [...head, `Could not read your stats: ${error}`, '', 'R tries again.']
   }
   if (rows.length === 0) {
-    return [...head, loading ? 'Counting your days…' : 'Nothing counted yet.']
+    return [...head, loading ? 'Reading your stats…' : 'Nothing counted yet.']
   }
-  const waiting = loading ? ['', 'Counting further back…'] : []
-  return [...head, ...statsTableLines(rows, totals, now), '', ...statsNotes(), ...waiting]
+  return [...head, ...statsTableLines(rows, totals, now), '', ...statsNotes()]
 }
