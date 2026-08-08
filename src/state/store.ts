@@ -81,6 +81,10 @@ export type AppState = {
   // A short terminal cannot hold every key at once, so the popup scrolls. The screen owns
   // how far it can go, because only the screen knows how many rows it has.
   helpScroll: number
+  // What a copy left on the clipboard, shown in the corner for a moment. The status line
+  // holds one line for the whole app, so a copy there would sit under the reader's eye at
+  // the far end of the window and be gone before it is read.
+  toast?: string
   status: string
 }
 
@@ -106,6 +110,11 @@ export const toggleHelp = (state: AppState): AppState => ({ ...state, helpOpen: 
 
 export const closeHelp = (state: AppState): AppState =>
   state.helpOpen ? { ...state, helpOpen: false, helpScroll: 0 } : state
+
+export const showToast = (state: AppState, toast: string): AppState => ({ ...state, toast })
+
+export const clearToast = (state: AppState): AppState =>
+  state.toast === undefined ? state : { ...state, toast: undefined }
 
 export const scrollHelp = (state: AppState, delta: number, max: number): AppState => {
   const helpScroll = Math.max(0, Math.min(max, state.helpScroll + delta))

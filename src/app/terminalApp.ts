@@ -4,7 +4,7 @@ import { TwitterClient } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, repliesOpen, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, selectRelativeTweet, setFeedSort, toggleHelp, toggleLightbox, toggleReplies, videoOf, type AppState, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
+import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, clearToast, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, repliesOpen, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, selectRelativeTweet, setFeedSort, showToast, toggleHelp, toggleLightbox, toggleReplies, videoOf, type AppState, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
 import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
@@ -14,11 +14,16 @@ import { createImageLayer, writeToTerminal, type ImagePlacement } from '../media
 import { cellSize } from '../media/geometry.ts'
 import { detectImageRenderer } from '../media/detect.ts'
 import { kittyDeleteAll } from '../media/kitty.ts'
-import { openExternal, tweetUrl } from '../media/openExternal.ts'
+import { copyToClipboard, openExternal, tweetUrl } from '../media/openExternal.ts'
 
 // Which end of the feed a fetch asks for. X gives a page two cursors that point opposite
 // ways, so the mode picks the cursor and the mode picks where the page lands.
 export type FeedLoad = 'initial' | 'newer' | 'older'
+
+// Long enough to read the corner note without a key, short enough to stay out of the way.
+export const toastLife = 2200
+
+export const copyMark = '⧉'
 
 export const cursorFor = (timeline: TimelineState, mode: FeedLoad): string | undefined => {
   if (mode === 'newer') {
@@ -200,6 +205,35 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     }
     // Pane heights drive the detail row budget, so a resize needs a fresh pass.
     renderer.on(CliRenderEvents.RESIZE, rerender)
+
+    // The corner note goes on its own after a moment. A second copy restarts the clock, so
+    // the note never leaves while the reader is still looking at it.
+    let toastTimer: ReturnType<typeof setTimeout> | undefined
+    const flashToast = (text: string): void => {
+      clearTimeout(toastTimer)
+      state = showToast(state, text)
+      rerender()
+      toastTimer = setTimeout(() => {
+        state = clearToast(state)
+        rerender()
+      }, toastLife)
+    }
+
+    const copyLink = async (): Promise<void> => {
+      const tweet = focusedTweet(state)
+      if (!tweet) {
+        return
+      }
+      const url = tweetUrl(tweet)
+      try {
+        await copyToClipboard(url)
+        state = { ...state, status: `copied ${url}` }
+        flashToast(`${copyMark} link copied`)
+      } catch (error) {
+        state = { ...state, status: `copy failed: ${errorMessage(error)}` }
+        flashToast(`${copyMark} copy failed`)
+      }
+    }
 
     const loadFeed = async (feed: FeedId, mode: FeedLoad): Promise<void> => {
       const before = state.timelines[feed].tweetIds.length
@@ -665,6 +699,11 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
           state = { ...state, status: `opened ${tweetUrl(tweet)}` }
           rerender()
         }
+        return
+      }
+      // The link goes to the system clipboard, so it pastes anywhere the reader shares it.
+      if (key.name === 'y') {
+        void copyLink()
         return
       }
       // The terminal draws the still frame; the system player gets the mp4 itself.

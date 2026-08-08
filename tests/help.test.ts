@@ -78,7 +78,7 @@ describe('the key list', () => {
 
   test('names every key the app answers', () => {
     const listed = new Set(helpGroups.flatMap((group) => group.entries.map((entry) => entry.keys)))
-    for (const keys of ['j / k', 'Tab', 's', 'R', 'l', 'b', 'r', 't', 'p', 'v', 'o', '?', 'q', 'Enter', 'Esc', 'Cmd+V']) {
+    for (const keys of ['j / k', 'Tab', 's', 'R', 'l', 'b', 'r', 't', 'p', 'v', 'o', 'y', '?', 'q', 'Enter', 'Esc', 'Cmd+V']) {
       expect(listed).toContain(keys)
     }
   })

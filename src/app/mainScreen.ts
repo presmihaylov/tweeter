@@ -362,6 +362,7 @@ export const helpGroups: readonly HelpGroup[] = [
       { keys: 'p', what: 'enlarge a photo' },
       { keys: 'v', what: 'play the video' },
       { keys: 'o', what: 'open in your browser' },
+      { keys: 'y', what: 'copy the link to the clipboard' },
       { keys: '?', what: 'this popup, on and off' },
       { keys: 'q', what: 'quit' }
     ]
@@ -463,6 +464,15 @@ export const helpScrollMax = (terminalWidth: number, terminalHeight: number): nu
     0,
     helpContentHeight(helpStacks(terminalWidth)) + helpChrome - helpCardHeight(terminalWidth, terminalHeight)
   )
+
+// The window pad takes the first row, the header the next three, and the gap under it one,
+// so the toast starts on the top row of the pane below and stays clear of the header keys.
+export const toastTop = 5
+
+// Its own border and pad on both sides. A line too long for the window is cut, so the box
+// never runs off the left edge.
+export const toastWidth = (text: string, terminalWidth: number): number =>
+  Math.max(10, Math.min(text.length + 4, terminalWidth - 6))
 
 export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions = {}): MainScreen => {
   const now = opts.now ?? ((): Date => new Date())
@@ -1067,11 +1077,41 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   }
   helpPopup.onMouseDown = () => { opts.onCloseHelp?.() }
 
+  // A copy leaves nothing on the screen to show for itself. The corner says so for a moment
+  // and then goes, rather than the status line, which sits on the far bottom row.
+  const toastBox = new BoxRenderable(renderer, {
+    id: 'toast',
+    position: 'absolute',
+    top: toastTop,
+    // An absolute box measures from the window edge, not from the pad inside it, so the
+    // right edge takes that one column back and lands on the border of the pane.
+    right: 1,
+    zIndex: 90,
+    width: 1,
+    height: 3,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: '#3fb950',
+    backgroundColor: '#0d1117',
+    paddingX: 1,
+    visible: false
+  })
+  const toastText = new TextRenderable(renderer, {
+    id: 'toast-text',
+    content: '',
+    fg: '#3fb950',
+    width: '100%',
+    height: 1,
+    truncate: true
+  })
+  toastBox.add(toastText)
+
   shell.add(header)
   shell.add(body)
   shell.add(lightbox)
   shell.add(composer)
   shell.add(status)
+  shell.add(toastBox)
   shell.add(helpPopup)
   renderer.root.add(shell)
 
@@ -1558,6 +1598,12 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       composer.height = drawer.height
       composerText.content = drawer.text
       caret = state.composer.open ? { row: drawer.caretRow, col: drawer.caretCol } : undefined
+      const toast = state.toast
+      toastBox.visible = toast !== undefined
+      if (toast !== undefined) {
+        toastText.content = toast
+        toastBox.width = toastWidth(toast, renderer.terminalWidth)
+      }
       statusText.content = state.status
       statusText.fg = state.status.includes('error') || state.status.includes('failed') ? '#ff7b72' : '#7d8590'
       renderCards(state)
