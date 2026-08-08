@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { createTestRenderer } from '@opentui/core/testing'
 import { createMainScreen, repliesClosedTitle, repliesEmpty, repliesTitle, replyCapacity } from '../src/app/mainScreen.ts'
+import { leftArrow } from '../src/app/terminalApp.ts'
 import {
   beginConversationLoad,
   clearDetailSelection,
@@ -420,6 +421,31 @@ describe('the left arrow', () => {
   test('does nothing when the feed already owns the arrows', () => {
     const state = withReplies(3)
     expect(clearDetailSelection(state)).toBe(state)
+  })
+
+  test('shuts the open list before anything else', () => {
+    const state = leftArrow(openReplies(withReplies(3)))
+    expect(repliesOpen(state)).toBe(false)
+    expect(state.status).toBe('back to the tweet')
+  })
+
+  // The list carries no selection when nobody answered, and it still has to shut.
+  test('shuts a list that nobody answered', () => {
+    expect(repliesOpen(leftArrow(openReplies(withReplies(0))))).toBe(false)
+  })
+
+  test('shuts the list from any card in it', () => {
+    const third = selectRelativeDetail(selectRelativeDetail(openReplies(withReplies(3)), 1), 1)
+    expect(repliesOpen(leftArrow(third))).toBe(false)
+  })
+
+  test('hands the arrows back to the feed once the list is shut', () => {
+    expect(leftArrow(focusDetailText(withReplies(3))).status).toBe('back to the feed')
+  })
+
+  test('leaves the open tweet when the feed already owns the arrows', () => {
+    const inside = enterSelection(withReplies(3), 'r0')
+    expect(leftArrow(inside).detailStack).toEqual([])
   })
 })
 

@@ -4,7 +4,7 @@ import { TwitterClient } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, repliesOpen, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, selectRelativeTweet, setFeedSort, toggleHelp, toggleLightbox, toggleReplies, videoOf, type AppState, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
+import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, repliesOpen, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, selectRelativeTweet, setFeedSort, toggleHelp, toggleLightbox, toggleReplies, videoOf, type AppState, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
 import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
@@ -66,6 +66,19 @@ export const nextTab = (tab: TabId): TabId => {
     return 'forYou'
   }
   return tab === 'forYou' ? 'notifications' : 'following'
+}
+
+// ← walks back out one step at a time: it shuts the reply list first, because the header
+// says so and an empty list has no selection to clear; then it hands the arrows to the
+// feed; then it leaves the open tweet.
+export const leftArrow = (state: AppState): AppState => {
+  if (repliesOpen(state)) {
+    return closeReplies(state)
+  }
+  if (state.selectedDetailId !== undefined || state.textFocused) {
+    return clearDetailSelection(state)
+  }
+  return leaveSelection(state)
 }
 
 export type TerminalAppOptions = {
@@ -518,8 +531,8 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         rerender()
         return
       }
-      // The plain arrows follow the focus: → walks it rightwards through the pane, ← hands
-      // it back to the feed, and ↑/↓ work on whatever holds it. j/k always stay on the feed.
+      // The plain arrows follow the focus: → walks it rightwards through the pane, ← walks
+      // it back, and ↑/↓ work on whatever holds it. j/k always stay on the feed.
       // The text is a stop of its own only when it does not fit, so a short tweet keeps the
       // old walk, where → lands straight on the replies.
       // The text is measured behind the open reply list, so what it says there means
@@ -532,7 +545,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         return
       }
       if (key.name === 'left') {
-        state = state.selectedDetailId !== undefined || state.textFocused ? clearDetailSelection(state) : leaveSelection(state)
+        state = leftArrow(state)
         rerender()
         return
       }
