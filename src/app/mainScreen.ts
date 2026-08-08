@@ -1211,7 +1211,9 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   let quoteAvatarSlot: ImageSlot | undefined
   let detailAvatarSlot: ImageSlot | undefined
   let lightboxSlot: ImageSlot | undefined
-  let helpOpen = false
+  // Either popup covers the panes, and a picture is painted over the grid rather than into
+  // it, so both have to stop every picture the same way.
+  let popupOpen = false
   let articleSlots: ImageSlot[] = []
   let bodyParts: Renderable[] = []
   let scrollTop = 0
@@ -1571,7 +1573,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
         layOutHelp(state.helpScroll)
       }
       helpPopup.visible = state.helpOpen
-      helpOpen = state.helpOpen
+      popupOpen = state.helpOpen || state.stats.open
       statsPopup.visible = state.stats.open
       if (state.stats.open) {
         const lines = statsBodyLines({ ...state.stats, window: state.stats.window, now: now() })
@@ -1700,7 +1702,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       const cell = cellSize(renderer.resolution, renderer.terminalWidth, renderer.terminalHeight, process.env.TWEETER_CELL_PX)
       // A picture is painted on top of the terminal grid, not into it, so an avatar under
       // the popup would show through it. The popup owns the screen while it is open.
-      if (helpOpen) {
+      if (popupOpen) {
         return []
       }
       // The hidden panes keep their last measured size, so the lightbox states outright

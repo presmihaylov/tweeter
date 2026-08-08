@@ -502,6 +502,22 @@ describe('the page on the screen', () => {
     expect(frame).toContain('your stats, on and off')
   })
 
+  // A picture is painted over the grid, so an avatar behind the page would show through it.
+  test('holds back the pictures while it is up', async () => {
+    const harness = await createTestRenderer({ width: 120, height: 40 })
+    const screen = createMainScreen(harness.renderer)
+    const shown = stateWith({ open: false })
+    const withAvatar = mergeTimelinePage(shown, 'following', [{ ...mine('1'), author: { ...mine('1').author, avatarUrl: 'https://x.test/a.jpg' } }], {})
+    screen.render(withAvatar)
+    await harness.flush()
+    screen.render(withAvatar)
+    await harness.flush()
+    expect(screen.placements().length).toBeGreaterThan(0)
+    screen.render({ ...withAvatar, stats: { ...withAvatar.stats, open: true } })
+    await harness.flush()
+    expect(screen.placements()).toEqual([])
+  })
+
   // A window too short for thirty days has to scroll, and say that it does.
   test('a short window scrolls the days it cannot hold', async () => {
     const rows = buildStatsRows({ tweets: [], userId: me, window: 30, now })
