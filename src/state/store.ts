@@ -72,6 +72,10 @@ export type AppState = {
   // arrows: ↑/↓ scroll it here instead of moving a cursor. Never true together with
   // selectedDetailId, because both would answer the same key.
   textFocused: boolean
+  // The replies have a view of their own, so a tweet with a photo and a quote under it
+  // keeps every row of the pane for itself. This names the tweet whose list is open rather
+  // than raising a flag, so the view ends by itself once another tweet takes the pane.
+  repliesOpenFor?: string
   // The key list outgrew the header row, so it lives in a popup that ? opens and closes.
   helpOpen: boolean
   // A short terminal cannot hold every key at once, so the popup scrolls. The screen owns
@@ -269,7 +273,7 @@ export const selectRelativeRow = (state: AppState, delta: number): AppState => {
   const base = currentIndex >= 0 ? currentIndex : 0
   const nextIndex = Math.max(0, Math.min(rows.length - 1, base + delta))
   const status = state.detailStack.length > 0 ? 'left quote' : state.status
-  return { ...state, selectedRowKey: rows[nextIndex]?.key, lightbox: undefined, detailStack: [], selectedDetailId: undefined, textFocused: false, status }
+  return { ...state, selectedRowKey: rows[nextIndex]?.key, lightbox: undefined, detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false, status }
 }
 
 // A sort change makes the loaded page and its cursor stale: the cursor indexes the old
@@ -482,6 +486,10 @@ export const replyIdsOf = (state: AppState): string[] => {
   return id ? state.conversations[id]?.replyIds ?? [] : []
 }
 
+// Whether the pane draws the reply list instead of the tweet.
+export const repliesOpen = (state: AppState): boolean =>
+  state.repliesOpenFor !== undefined && state.repliesOpenFor === focusedTweetId(state)
+
 // The tweet this one answers, but only once it is in the map. Drilling into a reply
 // always caches its parent first, so the pane can show it without another request.
 export const parentIdOf = (state: AppState): string | undefined => {
@@ -523,8 +531,42 @@ export const selectRelativeDetail = (state: AppState, delta: number): AppState =
   const base = current >= 0 ? current + delta : entry
   const next = Math.max(0, Math.min(ids.length - 1, base))
   const id = ids[next] ?? ''
-  return { ...state, selectedDetailId: id, textFocused: false, status: selectionStatus(state, id) }
+  // The cursor and the pane show the same thing: a reply opens the list, and the parent
+  // card is drawn beside the tweet, so landing on it closes the list again.
+  const onReply = replyIdsOf(state).includes(id)
+  return {
+    ...state,
+    selectedDetailId: id,
+    repliesOpenFor: onReply ? focusedTweetId(state) : undefined,
+    textFocused: false,
+    status: selectionStatus(state, id)
+  }
 }
+
+// The click on the replies header, and the c key, open the list on their own. The tweet
+// itself keeps the whole pane while the list is shut.
+export const openReplies = (state: AppState): AppState => {
+  const id = focusedTweetId(state)
+  if (id === undefined) {
+    return state
+  }
+  const first = replyIdsOf(state)[0]
+  return {
+    ...state,
+    repliesOpenFor: id,
+    selectedDetailId: first,
+    textFocused: false,
+    status: first !== undefined ? selectionStatus(state, first) : 'replies open · ← closes them'
+  }
+}
+
+export const closeReplies = (state: AppState): AppState =>
+  state.repliesOpenFor === undefined
+    ? state
+    : { ...state, repliesOpenFor: undefined, selectedDetailId: undefined, status: 'back to the tweet' }
+
+export const toggleReplies = (state: AppState): AppState =>
+  repliesOpen(state) ? closeReplies(state) : openReplies(state)
 
 // The tweet whose replies are still unfetched, if any. One request per tweet is enough:
 // the record survives an empty page, so a tweet with no replies is never asked twice.
@@ -556,20 +598,21 @@ export const needsOlderNotifications = (state: AppState): boolean => {
   return index >= 0 && index >= rows.length - olderPageMargin
 }
 
-// The plain ← hands the arrows back to the feed without leaving the open tweet.
+// The plain ← hands the arrows back to the feed without leaving the open tweet. It shuts
+// the reply list on the way, because that list is where the arrows most often are.
 export const clearDetailSelection = (state: AppState): AppState =>
-  state.selectedDetailId === undefined && !state.textFocused
+  state.selectedDetailId === undefined && !state.textFocused && state.repliesOpenFor === undefined
     ? state
-    : { ...state, selectedDetailId: undefined, textFocused: false, status: 'back to the feed' }
+    : { ...state, selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false, status: 'back to the feed' }
 
-// The plain right arrow jumps straight to the top of the reply list, whatever the
+// The plain right arrow opens the reply list and lands on its first card, whatever the
 // cursor was on before.
 export const selectFirstReply = (state: AppState): AppState => {
   const id = replyIdsOf(state)[0]
   if (id === undefined) {
-    return state
+    return openReplies(state)
   }
-  return { ...state, selectedDetailId: id, textFocused: false, status: selectionStatus(state, id) }
+  return { ...state, selectedDetailId: id, repliesOpenFor: focusedTweetId(state), textFocused: false, status: selectionStatus(state, id) }
 }
 
 // The middle stop of the plain →: the text of the open tweet. An article does not fit the
@@ -580,7 +623,7 @@ export const focusDetailText = (state: AppState): AppState => {
     return state
   }
   const what = tweet.article ? 'article' : 'text'
-  return { ...state, selectedDetailId: undefined, textFocused: true, status: `reading the ${what} · ↑/↓ scroll · → replies` }
+  return { ...state, selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: true, status: `reading the ${what} · ↑/↓ scroll · → replies` }
 }
 
 // Shift+→ opens whatever the reader picked last: the parent card or a reply when one is
@@ -634,5 +677,5 @@ export const selectRelativeTweet = (state: AppState, delta: number): AppState =>
   const nextIndex = Math.max(0, Math.min(timeline.tweetIds.length - 1, base + delta))
   // A stale "opened quote" line would otherwise still claim the quote is open.
   const status = state.detailStack.length > 0 ? 'left quote' : state.status
-  return { ...state, selectedTweetId: timeline.tweetIds[nextIndex], lightbox: undefined, detailStack: [], selectedDetailId: undefined, textFocused: false, status }
+  return { ...state, selectedTweetId: timeline.tweetIds[nextIndex], lightbox: undefined, detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false, status }
 }

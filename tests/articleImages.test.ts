@@ -231,8 +231,8 @@ describe('an article image in the lightbox', () => {
 describe('the article images on the screen', () => {
   type Drawn = { screen: ReturnType<typeof createMainScreen>; frame: () => string; draw: () => Promise<string> }
 
-  const render = async (state: AppState): Promise<Drawn> => {
-    const harness = await createTestRenderer({ width: 174, height: 52 })
+  const render = async (state: AppState, height = 52): Promise<Drawn> => {
+    const harness = await createTestRenderer({ width: 174, height })
     const screen = createMainScreen(harness.renderer, {})
     const draw = async (): Promise<string> => {
       screen.render(state)
@@ -261,15 +261,16 @@ describe('the article images on the screen', () => {
     expect(drawn.screen.visibleArticleImage()).toBeUndefined()
   })
 
+  // A short pane, so the body still has words under the fold.
   test('a picture holds its rows open in the body, above the words that follow it', async () => {
-    const drawn = await render(articleState())
+    const drawn = await render(articleState(), 40)
     expect(drawn.frame()).toContain('first')
     // The cover claims ten rows before the first paragraph, so the rest is below the fold.
     expect(drawn.frame()).not.toContain('the studio')
   })
 
   test('the scroll walks past a picture to the words under it', async () => {
-    const drawn = await render(articleState())
+    const drawn = await render(articleState(), 40)
     drawn.screen.scrollDetail(6)
     const frame = await drawn.draw()
     expect(frame).toContain('the studio')

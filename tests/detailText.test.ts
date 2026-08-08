@@ -132,7 +132,7 @@ describe('detail scrolling', () => {
     // The timeline card also prints the first lines, so the assertions use lines that
     // only the detail pane can reach, plus the markers themselves.
     const first = harness.captureCharFrame()
-    expect(first).toContain('▾ 49 more below · Ctrl+S')
+    expect(first).toContain('▾ 34 more below · Ctrl+S')
     expect(first).not.toContain('▴')
 
     screen.scrollDetail(3)
@@ -140,13 +140,13 @@ describe('detail scrolling', () => {
     await harness.flush()
     const scrolled = harness.captureCharFrame()
     expect(scrolled).toContain('▴ 3 more above · Ctrl+W')
-    expect(scrolled).toContain('▾ 47 more below · Ctrl+S')
+    expect(scrolled).toContain('▾ 32 more below · Ctrl+S')
 
     screen.scrollDetail(-3)
     screen.render(state)
     await harness.flush()
     const back = harness.captureCharFrame()
-    expect(back).toContain('▾ 49 more below · Ctrl+S')
+    expect(back).toContain('▾ 34 more below · Ctrl+S')
     expect(back).not.toContain('▴')
   })
 

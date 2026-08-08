@@ -1,22 +1,27 @@
 import { describe, expect, test } from 'bun:test'
 import { createTestRenderer } from '@opentui/core/testing'
-import { createMainScreen, repliesEmpty, repliesTitle, replyCapacity } from '../src/app/mainScreen.ts'
+import { createMainScreen, repliesClosedTitle, repliesEmpty, repliesTitle, replyCapacity } from '../src/app/mainScreen.ts'
 import {
   beginConversationLoad,
   clearDetailSelection,
+  closeReplies,
   enterSelection,
   failConversationLoad,
   needsReplies,
+  focusDetailText,
   focusedTweet,
   initialAppState,
   leaveSelection,
   detailTargets,
   mergeConversationPage,
   mergeTimelinePage,
+  openReplies,
   parentIdOf,
+  repliesOpen,
   selectFirstReply,
   selectRelativeDetail,
   selectRelativeTweet,
+  toggleReplies,
   type AppState
 } from '../src/state/store.ts'
 import type { AppTweet } from '../src/twitter/types.ts'
@@ -120,9 +125,57 @@ describe('the right arrow', () => {
     expect(selectFirstReply(third).selectedDetailId).toBe('r0')
   })
 
-  test('does nothing when the tweet has no replies', () => {
-    const state = withReplies(0)
-    expect(selectFirstReply(state)).toBe(state)
+  test('opens the list even when nobody answered', () => {
+    const state = selectFirstReply(withReplies(0))
+    expect(repliesOpen(state)).toBe(true)
+    expect(state.selectedDetailId).toBeUndefined()
+    expect(state.status).toBe('replies open · ← closes them')
+  })
+
+  test('the list opens with the cursor on it', () => {
+    expect(repliesOpen(selectFirstReply(withReplies(3)))).toBe(true)
+  })
+})
+
+describe('the replies as a view of their own', () => {
+  test('a tweet keeps the whole pane until the reader asks for the list', () => {
+    expect(repliesOpen(withReplies(3))).toBe(false)
+  })
+
+  test('c opens the list and lands on the first reply', () => {
+    const state = toggleReplies(withReplies(3))
+    expect(repliesOpen(state)).toBe(true)
+    expect(state.selectedDetailId).toBe('r0')
+  })
+
+  test('c again shuts it and gives the pane back to the tweet', () => {
+    const state = toggleReplies(toggleReplies(withReplies(3)))
+    expect(repliesOpen(state)).toBe(false)
+    expect(state.selectedDetailId).toBeUndefined()
+    expect(state.status).toBe('back to the tweet')
+  })
+
+  test('← shuts the list as well', () => {
+    expect(repliesOpen(clearDetailSelection(openReplies(withReplies(3))))).toBe(false)
+  })
+
+  test('a shut list stays shut', () => {
+    const state = withReplies(3)
+    expect(closeReplies(state)).toBe(state)
+  })
+
+  test('another tweet in the feed opens with its own list shut', () => {
+    const moved = selectRelativeTweet(openReplies(withReplies(3)), 1)
+    expect(repliesOpen(moved)).toBe(false)
+  })
+
+  test('the text takes the pane back from the list', () => {
+    expect(repliesOpen(focusDetailText(openReplies(withReplies(3))))).toBe(false)
+  })
+
+  test('an empty feed has no list to open', () => {
+    const state = initialAppState()
+    expect(openReplies(state)).toBe(state)
   })
 })
 
@@ -183,10 +236,15 @@ describe('reply list rows', () => {
     expect(replyCapacity(0)).toBe(1)
   })
 
-  test('the header states how to reach the list and how to open a reply', () => {
-    expect(repliesTitle(0, -1)).toBe('Replies')
-    expect(repliesTitle(3, -1)).toBe('Replies · 3  ·  → picks one')
-    expect(repliesTitle(3, 1)).toBe('Replies · 2/3  ·  Shift+→ opens it')
+  test('the open header says how to walk the list and how to leave it', () => {
+    expect(repliesTitle(0, -1)).toBe('Replies  ·  ← closes them')
+    expect(repliesTitle(3, -1)).toBe('Replies · 3  ·  ↑/↓ picks one  ·  ← closes them')
+    expect(repliesTitle(3, 1)).toBe('Replies · 2/3  ·  Shift+→ opens it  ·  ← closes them')
+  })
+
+  test('the shut header counts the replies and says what opens them', () => {
+    expect(repliesClosedTitle(0)).toBe('Replies  ·  click or → opens them')
+    expect(repliesClosedTitle(3)).toBe('Replies · 3  ·  click or → opens them')
   })
 })
 
@@ -194,11 +252,17 @@ const setup = async (state: AppState): Promise<{
   frame: string
   keys: string[]
   opened: string[]
+  toggles: number
   click: (key: string) => Promise<void>
+  clickText: (text: string) => Promise<void>
 }> => {
   const harness = await createTestRenderer({ width: 174, height: 52 })
   const opened: string[] = []
-  const screen = createMainScreen(harness.renderer, { onOpenTweet: (id: string) => { opened.push(id) } })
+  const counts = { toggles: 0 }
+  const screen = createMainScreen(harness.renderer, {
+    onOpenTweet: (id: string) => { opened.push(id) },
+    onToggleReplies: () => { counts.toggles += 1 }
+  })
   // The first pass has no measured pane, so the row budget only lands on the second.
   screen.render(state)
   await harness.flush()
@@ -211,50 +275,66 @@ const setup = async (state: AppState): Promise<{
     }
     await harness.mockMouse.click(placement.col, placement.row)
   }
-  return { frame: harness.captureCharFrame(), keys: screen.placements().map((item) => item.key), opened, click }
+  // A row of text carries no placement, so the click lands on the words themselves.
+  const clickText = async (text: string): Promise<void> => {
+    const rows = harness.captureCharFrame().split('\n')
+    const row = rows.findIndex((line) => line.includes(text))
+    if (row < 0) {
+      throw new Error(`no row holds ${text}`)
+    }
+    await harness.mockMouse.click(rows[row]?.indexOf(text) ?? 0, row)
+  }
+  return { frame: harness.captureCharFrame(), keys: screen.placements().map((item) => item.key), opened, get toggles() { return counts.toggles }, click, clickText }
 }
 
 describe('reply cards', () => {
   test('each reply gets a card with an avatar', async () => {
-    const harness = await setup(withReplies(3))
+    const harness = await setup(openReplies(withReplies(3)))
     expect(harness.frame).toContain('@ur0')
     expect(harness.frame).toContain('reply body 0')
     expect(harness.keys).toContain('avatar:reply:r0')
     expect(harness.keys).toContain('avatar:reply:r1')
   })
 
-  test('a click on a reply card opens that reply', async () => {
+  test('a shut list draws no card at all', async () => {
     const harness = await setup(withReplies(3))
+    expect(harness.frame).not.toContain('reply body 0')
+    expect(harness.keys).not.toContain('avatar:reply:r0')
+  })
+
+  test('a click on the header opens the list', async () => {
+    const harness = await setup(withReplies(3))
+    await harness.clickText('Replies · 3')
+    expect(harness.toggles).toBe(1)
+  })
+
+  test('a click on a reply card opens that reply', async () => {
+    const harness = await setup(openReplies(withReplies(3)))
     await harness.click('avatar:reply:r1')
     expect(harness.opened).toEqual(['r1'])
   })
 
   test('a reply card carries the same counts as a timeline card', async () => {
-    const harness = await setup(withReplies(3))
+    const harness = await setup(openReplies(withReplies(3)))
     // The timeline card prints the same line, so the count proves the reply card has one.
-    expect(harness.frame.split('\n').filter((row) => row.includes('1 replies   2 reposts   3 likes')).length).toBeGreaterThan(4)
+    expect(harness.frame.split('\n').filter((row) => row.includes('1 replies   2 reposts   3 likes')).length).toBeGreaterThan(3)
   })
 
   test('a conversation that is still on its way says so', async () => {
-    const harness = await setup(mergeTimelinePage(initialAppState(), 'following', [tweet('1')], {}))
+    const harness = await setup(openReplies(mergeTimelinePage(initialAppState(), 'following', [tweet('1')], {})))
     expect(harness.frame).toContain('Loading replies…')
   })
 
   test('a tweet that nobody answered says so', async () => {
-    const harness = await setup(withReplies(0))
+    const harness = await setup(openReplies(withReplies(0)))
     expect(harness.frame).toContain('No replies yet.')
   })
 
-  // A long tweet with a quote under it used to leave the strip one row, which drew the card as
-  // an empty blue sliver. The strip lists one line for each reply instead.
-  test('a strip too short for a card lists the replies one line each', async () => {
-    const harness = await createTestRenderer({ width: 120, height: 30 })
+  // A card needs six rows, so a window too short for one lists the replies one line each.
+  test('a list too short for a card lists the replies one line each', async () => {
+    const harness = await createTestRenderer({ width: 120, height: 24 })
     const screen = createMainScreen(harness.renderer)
-    const long: AppTweet = {
-      ...tweet('1', Array.from({ length: 30 }, (_, index) => `line ${index} of a very long tweet body`).join(' ')),
-      quotedTweet: tweet('9', 'the quoted post')
-    }
-    const base = mergeTimelinePage(initialAppState(), 'following', [long, tweet('2')], {})
+    const base = mergeTimelinePage(initialAppState(), 'following', [tweet('1'), tweet('2')], {})
     const state = selectRelativeDetail(mergeConversationPage(base, '1', [tweet('r0', 'reply body 0', '1'), tweet('r1', 'reply body 1', '1')]), 1)
     screen.render(state)
     await harness.flush()
@@ -271,6 +351,18 @@ describe('reply cards', () => {
     const harness = await setup(selectRelativeDetail(withReplies(3), 1))
     expect(harness.frame).not.toContain('▸ @ur0')
     expect(harness.frame).toContain('1 replies   2 reposts   3 likes')
+  })
+
+  // The reported case: the tweet lost most of its rows to a photo, a quote card and the list.
+  test('a long tweet keeps its rows while the list is shut', async () => {
+    const long: AppTweet = {
+      ...tweet('1', Array.from({ length: 30 }, (_, index) => `line ${index} of a very long tweet body`).join(' ')),
+      quotedTweet: tweet('9', 'the quoted post')
+    }
+    const base = mergeTimelinePage(initialAppState(), 'following', [long, tweet('2')], {})
+    const harness = await setup(mergeConversationPage(base, '1', [tweet('r0', 'reply body 0', '1')]))
+    expect(harness.frame).toContain('line 20 of a very long tweet body')
+    expect(harness.frame).toContain('the quoted post')
   })
 })
 

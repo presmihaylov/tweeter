@@ -1,5 +1,5 @@
 import { BoxRenderable, CliRenderEvents, TextRenderable, type CliRenderer, type Renderable } from '@opentui/core'
-import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, replyIdsOf, type AppState, type ConversationState, type FeedSort, type NotificationsState, type TabId } from '../state/store.ts'
+import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, repliesOpen, replyIdsOf, type AppState, type ConversationState, type FeedSort, type NotificationsState, type TabId } from '../state/store.ts'
 import type { AppMedia, AppNotice, AppTweet, AuthStatus, NoticeIcon, NotificationRow, WriteRetryNotice } from '../twitter/types.ts'
 import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
@@ -24,6 +24,7 @@ export type MainScreenOptions = {
   onCloseHelp?: () => void
   onOpenQuote?: () => void
   onOpenTweet?: (tweetId: string) => void
+  onToggleReplies?: () => void
   onOpenArticleImage?: (media: AppMedia, key: string) => void
   // A relative stamp is only relative to something. A test pins the clock so "3h" stays "3h".
   now?: () => Date
@@ -52,13 +53,22 @@ const articleImageCap = 10
 
 export type DetailLayout = { parent: number; text: number; media: number; quote: number; replies: number }
 
+// The replies view draws the author row, the header over the list and the metrics bar, and
+// nothing else: 4 rows of border and padding, 3 gaps between the four boxes, and 5 rows for
+// the three that are not the list.
+const repliesViewChrome = 4 + 3 + 5
+
 // Flex alone let the quote card eat the photo's rows, so the detail pane divides them
 // itself. Order of claim: the parent card, the quote card text, the tweet text, the
-// quoted photo, the tweet photo, then the replies. Anything under mediaFloor draws as a
-// useless sliver, so those rows go back to the replies instead.
-export const detailLayout = (paneHeight: number, opts: { photo: boolean; quote: boolean; quotePhoto: boolean; parent: boolean; textLines: number; article?: boolean }): DetailLayout => {
+// quoted photo, then the tweet photo. Anything under mediaFloor draws as a useless
+// sliver, so those rows stay blank instead.
+export const detailLayout = (paneHeight: number, opts: { photo: boolean; quote: boolean; quotePhoto: boolean; parent: boolean; textLines: number; article?: boolean; repliesOpen?: boolean }): DetailLayout => {
   if (paneHeight < 1) {
-    return { parent: 0, text: detailTextFloor, media: 0, quote: 0, replies: repliesFloor }
+    return { parent: 0, text: opts.repliesOpen === true ? 0 : detailTextFloor, media: 0, quote: 0, replies: repliesFloor }
+  }
+  // The reply list is a view of its own, so it takes the pane rather than share it.
+  if (opts.repliesOpen === true) {
+    return { parent: 0, text: 0, media: 0, quote: 0, replies: Math.max(0, paneHeight - repliesViewChrome) }
   }
   const boxes = 6 + (opts.photo ? 1 : 0) + (opts.quote ? 1 : 0) + (opts.parent ? 1 : 0)
   // The border and padding take 4 rows. The author row, the caption, the replies header
@@ -68,30 +78,30 @@ export const detailLayout = (paneHeight: number, opts: { photo: boolean; quote: 
   const parent = opts.parent ? Math.min(body, parentRows) : 0
   const quoteBase = opts.quote ? Math.min(body - parent, quoteRows) : 0
   // A short tweet gives its spare rows to the photo; a long one scrolls at the cap. An
-  // article carries thousands of characters, so it keeps every row the pane can spare
-  // above one reply card, or the reader would hold the scroll key for a page at a time.
+  // article carries thousands of characters, so it keeps every row the pane can spare.
   const textRoom = body - parent - quoteBase
   const mediaWant = opts.photo ? mediaFloor : 0
-  const cap = opts.article ? Math.max(detailTextCap, textRoom - repliesFloor - mediaWant) : detailTextCap
+  const cap = opts.article ? Math.max(detailTextCap, textRoom - mediaWant) : detailTextCap
   const natural = Math.min(cap, Math.max(detailTextFloor, opts.textLines))
-  // The text used to claim its cap before the replies claimed anything, so a long tweet with a
-  // quote under it left the replies a clipped card or no card at all. The text scrolls under
-  // Ctrl+S and a reply strip does not, so the replies are paid first, down to what is left over
-  // the text floor. An article is the exception: it is thousands of characters, so it holds its
-  // cap and lets the strip go short.
-  const repliesWant = Math.min(repliesFloor, Math.max(0, textRoom - detailTextFloor - mediaWant))
-  const wanted = opts.article ? natural : Math.min(natural, Math.max(detailTextFloor, textRoom - repliesWant - mediaWant))
+  // The replies used to hold a whole card here, which is what squeezed a long tweet with a
+  // quote under it down to a few rows. They live behind their own view now, so only the
+  // photo floor stands between the text and the rows it asks for.
+  const wanted = opts.article ? natural : Math.min(natural, Math.max(detailTextFloor, textRoom - mediaWant))
   const text = Math.max(0, Math.min(wanted, textRoom))
   const rest = Math.max(0, body - parent - quoteBase - text)
   const quoteWanted = opts.quote && opts.quotePhoto
-    ? Math.min(quotePhotoRows, Math.max(0, rest - repliesFloor - (opts.photo ? mediaFloor : 0)))
+    ? Math.min(quotePhotoRows, Math.max(0, rest - (opts.photo ? mediaFloor : 0)))
     : 0
   const quoteExtra = quoteWanted < mediaFloor ? 0 : quoteWanted
   const free = rest - quoteExtra
-  // The replies keep their floor whenever the pane can pay for both, but a photo that
-  // fits beside a single reply row still beats no photo at all.
-  const media = !opts.photo || free - 1 < mediaFloor ? 0 : Math.min(mediaCap, Math.max(mediaFloor, free - repliesFloor))
-  return { parent, text, media, quote: quoteBase + quoteExtra, replies: free - media }
+  const media = !opts.photo || free < mediaFloor ? 0 : Math.min(mediaCap, free)
+  // Nothing waits under the photo any more, so a tweet longer than its cap takes the rows
+  // the photo left rather than scroll over blank ones.
+  const spare = free - media
+  const extra = Math.min(spare, Math.max(0, opts.textLines - text))
+  // What the text, the photo and the quote card leave over stays blank under them, which is
+  // what keeps the metrics bar on the bottom row of the pane.
+  return { parent, text: text + extra, media, quote: quoteBase + quoteExtra, replies: spare - extra }
 }
 
 const namedEntities: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
@@ -332,6 +342,7 @@ export const helpGroups: readonly HelpGroup[] = [
       { keys: 'Tab', what: 'Following, For You, Notifications' },
       { keys: 's', what: 'sort Following' },
       { keys: 'R', what: 'refresh, newest on top' },
+      { keys: 'c', what: 'the replies, on and off' },
       { keys: '→ / ←', what: 'aim the arrows: text, replies, feed' },
       { keys: '↑ / ↓', what: 'move the aim, or scroll the text' },
       { keys: 'Shift+↑ / ↓', what: 'walk the replies from the feed' },
@@ -788,6 +799,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   quoteBox.add(quoteRow)
   quoteBox.add(quoteMediaBox)
 
+  // The header is also the way into the list, so it is a click target of its own.
   const repliesHeader = new TextRenderable(renderer, {
     id: 'replies-header',
     content: 'Replies',
@@ -795,6 +807,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     width: '100%',
     height: 1
   })
+  repliesHeader.onMouseDown = () => { opts.onToggleReplies?.() }
   // The replies are cards with avatars, like the timeline, so the same eye reads both.
   const repliesList = new BoxRenderable(renderer, {
     id: 'replies-list',
@@ -1192,9 +1205,13 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     replyCards = []
   }
 
-  const renderReplyCards = (state: AppState, rows: number): void => {
+  // The list only draws inside its own view; the rows it leaves stay blank behind the tweet.
+  const renderReplyCards = (state: AppState, rows: number, open: boolean): void => {
     clearReplyCards()
     replySlots = []
+    if (!open) {
+      return
+    }
     const ids = replyIdsOf(state)
     const conversation = focusedTweet(state) ? state.conversations[focusedTweet(state)?.id ?? ''] : undefined
     if (ids.length === 0) {
@@ -1473,7 +1490,10 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       const quotePhoto = previewOf(quoted)
       const parentId = parentIdOf(state)
       const parent = parentId !== undefined ? state.tweets[parentId] : undefined
-      const layout = detailLayout(detailPane.height, { photo: photo !== undefined, quote: quoted !== undefined, quotePhoto: quotePhoto !== undefined, parent: parent !== undefined, textLines: flowRows(detailItems), article: focused?.article !== undefined })
+      // The reply list takes the whole pane, so everything the tweet draws stands down
+      // while it is up rather than share the rows with it.
+      const listOpen = repliesOpen(state)
+      const layout = detailLayout(detailPane.height, { photo: photo !== undefined, quote: quoted !== undefined, quotePhoto: quotePhoto !== undefined, parent: parent !== undefined, textLines: flowRows(detailItems), article: focused?.article !== undefined, repliesOpen: listOpen })
       // The row budget only exists once the layout is out, so the flow is built again with
       // pictures that fit inside it. An article body always overflows, so the budget itself
       // does not move.
@@ -1481,13 +1501,16 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       if (cap !== articleImageCap && detailItems.some((item) => item.kind === 'image')) {
         detailItems = detailFlow(focused, detailBody.width, cell, 'Select a tweet with j/k.', cap)
       }
+      detailBody.visible = !listOpen
       detailBody.height = layout.text
       detailScroll = clampFlowScroll(detailItems, detailScroll, layout.text)
       // The arrows own the text now, so it brightens the way a selected card does.
       renderBody(flowBlock(detailItems, detailScroll, layout.text, state.textFocused), state.textFocused)
-      detailHints.content = detailHint(focused, state.detailStack.length, parent !== undefined, { scrolls: flowRows(detailItems) > layout.text, focused: state.textFocused })
+      detailHints.content = listOpen
+        ? repliesHint(focused, state.detailStack.length)
+        : detailHint(focused, state.detailStack.length, parent !== undefined, { scrolls: flowRows(detailItems) > layout.text, focused: state.textFocused })
       const parentSelected = parent !== undefined && parent.id === state.selectedDetailId
-      parentBox.visible = parent !== undefined
+      parentBox.visible = parent !== undefined && !listOpen
       parentBox.height = layout.parent
       parentBox.borderColor = parentSelected ? '#58a6ff' : '#30363d'
       parentBox.backgroundColor = parentSelected ? '#111b2b' : '#0d1117'
@@ -1504,21 +1527,28 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       detailPosted.width = postedStamp.length
       repliesList.height = layout.replies
       // An empty image box would still claim its share of the pane, so hide it.
+      mediaText.visible = !listOpen
       mediaBox.visible = layout.media > 0
       mediaBox.height = layout.media
       mediaTiles = renderTiles(mediaTiles, { box: mediaBox, pane: detailPane, id: 'detail-media-tile', source: 'tweet', tweet: focused, visible: layout.media > 0 })
-      quoteBox.visible = quoted !== undefined
+      quoteBox.visible = quoted !== undefined && !listOpen
       quoteBox.height = layout.quote
       const quoteMediaRows = layout.quote - quoteRows
       quoteMediaBox.visible = quotePhoto !== undefined && quoteMediaRows > 0
       quoteAuthor.content = quoted ? `${quoted.author.name}${quoted.author.verified ? ' ✔' : ''}  @${quoted.author.handle}${postedPill(quoted, now())}` : ''
       quoteText.content = quoted ? decodeEntities(quoted.text).replaceAll('\n', ' ') : ''
-      quoteAvatarSlot = quoted?.author.avatarUrl
+      // A hidden card keeps the size it last measured, so the avatar has to go with it or
+      // it would paint over the replies.
+      quoteAvatarSlot = quoted?.author.avatarUrl && layout.quote > 0
         ? { key: `avatar:${quoted.id}`, url: quoted.author.avatarUrl, box: quoteAvatar, pane: quoteBox, width: 1, height: 1, minCols: avatarCols, minRows: avatarRows }
         : undefined
       quoteTiles = renderTiles(quoteTiles, { box: quoteMediaBox, pane: quoteBox, id: 'detail-quote-tile', source: 'quote', tweet: quoted, visible: quoteMediaRows > 0 })
-      repliesHeader.content = repliesTitle(replyIdsOf(state).length, state.selectedDetailId ? replyIdsOf(state).indexOf(state.selectedDetailId) : -1)
-      renderReplyCards(state, layout.replies)
+      const replyIds = replyIdsOf(state)
+      repliesHeader.content = listOpen
+        ? repliesTitle(replyIds.length, state.selectedDetailId ? replyIds.indexOf(state.selectedDetailId) : -1)
+        : repliesClosedTitle(replyIds.length)
+      repliesHeader.fg = listOpen ? '#f0f6fc' : '#58a6ff'
+      renderReplyCards(state, layout.replies, listOpen)
       composer.visible = state.composer.open
       composerTitle.content = composerHeading(state)
       // The drawer is measured only after it is drawn, so the shell gives the width until then:
@@ -1769,12 +1799,31 @@ export const noticeHint = (notice: AppNotice, opened: boolean): string => {
 export const replyLine = (reply: AppTweet, selected: boolean): string =>
   `${selected ? '▸' : ' '} @${reply.author.handle}  ${decodeEntities(reply.text).replaceAll('\n', ' ')}`
 
+// The header of the open list. It carries the way out as well, because the list covers the
+// tweet it belongs to.
 export const repliesTitle = (total: number, index: number): string => {
   if (total === 0) {
-    return 'Replies'
+    return 'Replies  ·  ← closes them'
   }
-  const position = index >= 0 ? `${index + 1}/${total}  ·  Shift+→ opens it` : `${total}  ·  → picks one`
-  return `Replies · ${position}`
+  const position = index >= 0 ? `${index + 1}/${total}  ·  Shift+→ opens it` : `${total}  ·  ↑/↓ picks one`
+  return `Replies · ${position}  ·  ← closes them`
+}
+
+// While the list is shut the tweet holds the whole pane, so this line is the way in.
+export const repliesClosedTitle = (total: number): string =>
+  `Replies${total > 0 ? ` · ${total}` : ''}  ·  click or → opens them`
+
+// The list stands where the tweet was, so the hint line names the keys of the list rather
+// than what the tweet under it offers.
+export const repliesHint = (tweet: AppTweet | undefined, depth: number): string => {
+  if (!tweet) {
+    return 'Select a tweet with j/k.'
+  }
+  const parts = ['↑/↓ walks the replies', 'Shift+→ opens one', '← back to the tweet']
+  if (depth > 0) {
+    parts.push(`depth ${depth}  ·  Shift+← back`)
+  }
+  return parts.join('  ·  ')
 }
 
 // The handle says whose tweet the draft answers or reposts, and the count says whether X

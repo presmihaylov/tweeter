@@ -103,21 +103,22 @@ describe('the body the feed leaves out', () => {
 describe('the rows an article claims', () => {
   const opts = { photo: false, quote: false, quotePhoto: false, parent: false, textLines: 200 }
 
-  test('takes every row the pane can spare above one reply card', () => {
+  test('takes every row the pane can spare', () => {
     const layout = detailLayout(50, { ...opts, article: true })
-    expect(layout.text).toBe(29)
-    expect(layout.replies).toBe(6)
+    expect(layout.text).toBe(35)
+    expect(layout.replies).toBe(0)
   })
 
-  test('a long tweet that is not an article keeps the old cap', () => {
-    expect(detailLayout(50, opts).text).toBe(12)
+  // The photo claims its rows before a plain tweet, and after an article.
+  test('an article outranks the cover photo, a plain tweet does not', () => {
+    expect(detailLayout(50, { ...opts, photo: true, article: true }).text).toBe(31)
+    expect(detailLayout(50, { ...opts, photo: true }).text).toBe(22)
   })
 
   test('leaves the cover photo its rows', () => {
     const layout = detailLayout(50, { ...opts, photo: true, article: true })
-    expect(layout.text).toBe(25)
     expect(layout.media).toBeGreaterThanOrEqual(3)
-    expect(layout.replies).toBe(6)
+    expect(layout.replies).toBe(0)
   })
 
   test('a pane too small to pay for both never drops below the old cap', () => {

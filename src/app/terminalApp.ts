@@ -4,7 +4,7 @@ import { TwitterClient } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, selectRelativeTweet, setFeedSort, toggleHelp, toggleLightbox, videoOf, type AppState, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
+import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, repliesOpen, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, selectRelativeTweet, setFeedSort, toggleHelp, toggleLightbox, toggleReplies, videoOf, type AppState, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
 import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
@@ -123,6 +123,12 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       state = enterSelection(state, tweetId)
       rerender()
     }
+    // The replies have a view of their own, so the tweet keeps every row of the pane until
+    // the reader asks for them.
+    const switchReplies = (): void => {
+      state = toggleReplies(state)
+      rerender()
+    }
     const screen = createMainScreen(renderer, {
       onOpenPhoto: openPhoto,
       onCloseLightbox: closePhoto,
@@ -132,6 +138,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       },
       onOpenQuote: () => { openSelection() },
       onOpenTweet: (tweetId) => { openSelection(tweetId) },
+      onToggleReplies: switchReplies,
       onOpenArticleImage: openArticleImage
     })
     const client = new TwitterClient({ authToken: profile.authToken, ct0: profile.ct0, cookieHeader: profile.cookieHeader, debugLogger })
@@ -198,7 +205,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         // refresh that found some also moves the cursor up to them.
         const top = state.timelines[feed].tweetIds[0]
         if (mode === 'newer' && added > 0 && top !== undefined) {
-          state = { ...state, selectedTweetId: top, detailStack: [], selectedDetailId: undefined, textFocused: false }
+          state = { ...state, selectedTweetId: top, detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false }
         }
         state = { ...state, status: feedLoadResult(mode, added) }
       } catch (error) {
@@ -220,7 +227,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         const added = state.notifications.rows.length - before
         const top = state.notifications.rows[0]
         if (mode === 'newer' && added > 0 && top !== undefined) {
-          state = { ...state, selectedRowKey: top.key, detailStack: [], selectedDetailId: undefined, textFocused: false }
+          state = { ...state, selectedRowKey: top.key, detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false }
         }
         state = { ...state, status: notificationLoadResult(mode, added) }
       } catch (error) {
@@ -515,8 +522,10 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       // it back to the feed, and ↑/↓ work on whatever holds it. j/k always stay on the feed.
       // The text is a stop of its own only when it does not fit, so a short tweet keeps the
       // old walk, where → lands straight on the replies.
+      // The text is measured behind the open reply list, so what it says there means
+      // nothing: → walks the list the reader is already on.
       if (key.name === 'right') {
-        state = state.textFocused || state.selectedDetailId !== undefined || !screen.detailScrolls()
+        state = repliesOpen(state) || state.textFocused || state.selectedDetailId !== undefined || !screen.detailScrolls()
           ? selectFirstReply(state)
           : focusDetailText(state)
         rerender()
@@ -561,7 +570,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         // only fetches the first page of a tab that holds nothing yet.
         if (next === 'notifications') {
           if (state.notifications.rows.length > 0) {
-            state = { ...state, activeTab: next, detailStack: [], selectedDetailId: undefined, textFocused: false, status: 'switched to notifications' }
+            state = { ...state, activeTab: next, detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false, status: 'switched to notifications' }
             rerender()
             return
           }
@@ -569,7 +578,7 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
           return
         }
         if (state.timelines[next].tweetIds.length > 0) {
-          state = { ...state, activeTab: next, selectedTweetId: state.timelines[next].tweetIds[0], detailStack: [], selectedDetailId: undefined, textFocused: false, status: 'switched feed' }
+          state = { ...state, activeTab: next, selectedTweetId: state.timelines[next].tweetIds[0], detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false, status: 'switched feed' }
           rerender()
           return
         }
@@ -604,6 +613,11 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
       if (key.name === 'b') {
         void toggleBookmark()
+        return
+      }
+      // Ctrl+C quits through the renderer, so only the plain c opens the replies.
+      if (key.name === 'c' && !key.ctrl) {
+        switchReplies()
         return
       }
       if (key.name === 'r') {
