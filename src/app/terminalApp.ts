@@ -1,15 +1,18 @@
 import { CliRenderEvents, createCliRenderer, decodePasteBytes } from '@opentui/core'
-import type { AppMedia, AppTweet, AuthStatus, NotificationRow, PostResult, WriteRetryNotice } from '../twitter/types.ts'
-import { TwitterClient } from '../twitter/client.ts'
+import type { AppMedia, AppProfile, AppTweet, AuthStatus, NotificationRow, PostResult, WriteRetryNotice } from '../twitter/types.ts'
+import { TwitterClient, userIdFromCookies } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, clearToast, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, repliesOpen, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, selectRelativeTweet, setFeedSort, showToast, toggleHelp, toggleLightbox, toggleReplies, videoOf, type AppState, type ComposerMode, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
+import { applyBookmark, applyLike, beginConversationLoad, beginStatsLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, closeStats, clearToast, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, failStatsLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeStats, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, repliesOpen, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, scrollStats, selectRelativeTweet, setFeedSort, showToast, toggleHelp, toggleLightbox, toggleReplies, toggleStats, turnStatsWindow, videoOf, type AppState, type ComposerMode, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
 import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
-import { caretMoveFor, cleanPasted, helpScrollStep, isCtrlEnterKey, isEnterKey, isHelpKey, isNewlineKey, isTextInput, pastedText } from './keyEvents.ts'
+import { caretMoveFor, cleanPasted, helpScrollStep, isCtrlEnterKey, isEnterKey, isHelpKey, isNewlineKey, isStatsKey, isTextInput, pastedText } from './keyEvents.ts'
+import { buildStatsRows, coveredFromOf, statsTotals, type StatsWindow } from '../stats/aggregate.ts'
+import { loadStatsTweets } from '../stats/load.ts'
+import { readFollowerLog, recordFollowers, writeFollowerLog, type FollowerLog } from '../stats/followerLog.ts'
 import { createImageLayer, writeToTerminal, type ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize } from '../media/geometry.ts'
 import { detectImageRenderer } from '../media/detect.ts'
@@ -182,6 +185,10 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         state = closeHelp(state)
         rerender()
       },
+      onCloseStats: () => {
+        state = closeStats(state)
+        rerender()
+      },
       onOpenQuote: () => { openSelection() },
       onOpenTweet: (tweetId) => { openSelection(tweetId) },
       onToggleReplies: switchReplies,
@@ -261,6 +268,107 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         state = { ...state, status: `copy failed: ${errorMessage(error)}` }
         flashToast(`${copyMark} copy failed`)
       }
+    }
+
+    // The stats page reads the profile timeline, which no pane asks for, so it keeps the
+    // pages it fetched to itself. A window inside the one already fetched is counted again
+    // from that cache rather than fetched a second time.
+    const userId = userIdFromCookies(profile.cookieHeader ?? '')
+    let statsCache: { tweets: AppTweet[]; profile?: AppProfile; window: StatsWindow; coveredFrom?: string; complete: boolean } | undefined
+    let followerLog: FollowerLog = {}
+    // Only the newest load may write to the page. A wider window asked for while the last
+    // one still pages would otherwise draw its own rows over the newer ones.
+    let statsRun = 0
+    let statsInFlight: StatsWindow | undefined
+
+    const countStats = (cache: NonNullable<typeof statsCache>, window: StatsWindow, now: Date, more = false): void => {
+      const rows = buildStatsRows({ tweets: cache.tweets, userId: userId ?? '', window, now, followers: followerLog, coveredFrom: cache.coveredFrom })
+      state = mergeStats(state, { rows, totals: statsTotals(rows), profile: cache.profile, loadedWindow: cache.window, loading: more })
+      rerender()
+    }
+
+    // X reports the follower count for right now, so every load writes it down. A day the
+    // app never ran leaves no count, and the page says so rather than guessing.
+    const sampleFollowers = async (found: AppProfile | undefined, now: Date): Promise<void> => {
+      if (!found) {
+        return
+      }
+      followerLog = recordFollowers(followerLog, found.followers, now)
+      await writeFollowerLog(followerLog)
+    }
+
+    const loadStats = async (): Promise<void> => {
+      if (userId === undefined) {
+        state = failStatsLoad(state, 'these cookies do not name an account')
+        rerender()
+        return
+      }
+      statsRun += 1
+      const run = statsRun
+      const window = state.stats.window
+      statsInFlight = window
+      state = beginStatsLoad(state)
+      rerender()
+      try {
+        const now = new Date()
+        followerLog = await readFollowerLog()
+        const load = await loadStatsTweets({
+          client,
+          userId,
+          window,
+          now,
+          onPage: (partial) => {
+            if (run !== statsRun) {
+              return
+            }
+            statsCache = {
+              tweets: partial.tweets,
+              profile: partial.profile,
+              window,
+              coveredFrom: coveredFromOf({ tweets: partial.tweets, userId, exhausted: partial.exhausted, now }),
+              complete: false
+            }
+            countStats(statsCache, window, now, true)
+          }
+        })
+        if (run !== statsRun) {
+          return
+        }
+        statsInFlight = undefined
+        await sampleFollowers(load.profile, now)
+        statsCache = {
+          tweets: load.tweets,
+          profile: load.profile,
+          window,
+          coveredFrom: coveredFromOf({ tweets: load.tweets, userId, exhausted: load.exhausted, now }),
+          complete: true
+        }
+        countStats(statsCache, window, now)
+      } catch (error) {
+        if (run !== statsRun) {
+          return
+        }
+        statsInFlight = undefined
+        state = failStatsLoad(state, errorMessage(error))
+        rerender()
+      }
+    }
+
+    // A narrower window is already in what the wider one fetched, so only a wider one costs
+    // a request. A load that is still paging answers for its own window too: it goes on
+    // writing rows behind the page, so asking again would only fetch the same tweets twice.
+    const showStats = async (): Promise<void> => {
+      const window = state.stats.window
+      const cache = statsCache
+      const running = statsInFlight !== undefined && statsInFlight >= window
+      if (cache && cache.window >= window && (cache.complete || running)) {
+        countStats(cache, window, new Date(), running)
+        return
+      }
+      if (running) {
+        return
+      }
+      await loadStats()
     }
 
     const loadFeed = async (feed: FeedId, mode: FeedLoad): Promise<void> => {
@@ -504,6 +612,32 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         closePhoto()
         return
       }
+      // The stats page is modal the way the key popup is: it covers the feed, so only the
+      // keys that close it, change its window, retry it or scroll it act.
+      if (state.stats.open) {
+        if (isStatsKey(key) || key.name === 'q' || key.name === 'escape' || isEnterKey(key)) {
+          state = closeStats(state)
+          rerender()
+          return
+        }
+        if (key.name === 'w') {
+          state = turnStatsWindow(state)
+          rerender()
+          void showStats()
+          return
+        }
+        if (key.name === 'R' || (key.shift && key.name === 'r')) {
+          statsCache = undefined
+          void loadStats()
+          return
+        }
+        const statsStep = helpScrollStep(key)
+        if (statsStep !== 0) {
+          state = scrollStats(state, statsStep, screen.statsScrollMax(state))
+          rerender()
+        }
+        return
+      }
       // The popup is modal while it is up, so a stray j does not walk a feed the reader
       // cannot see. Only the keys that close it, and the ones that scroll it, act.
       if (state.helpOpen) {
@@ -523,6 +657,13 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       if (isHelpKey(key) && !state.composer.open) {
         state = toggleHelp(state)
         rerender()
+        return
+      }
+      // The drawer is a text field, so a capital S belongs in the draft.
+      if (isStatsKey(key) && !state.composer.open) {
+        state = toggleStats(state)
+        rerender()
+        void showStats()
         return
       }
       if (key.name === 'q' && !state.composer.open) {

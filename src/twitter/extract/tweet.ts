@@ -1,4 +1,4 @@
-import type { AppTweet } from '../types.ts'
+import type { AppProfile, AppTweet } from '../types.ts'
 import { getBool, getInt, getMap, getSlice, getStr, isRecord } from '../../utils/guards.ts'
 import { extractMedia } from './media.ts'
 import { extractArticle } from './article.ts'
@@ -203,6 +203,8 @@ export const parseUserTweets = (instructions: unknown[]): AppTweet[] => {
   const seen = new Set<string>()
   const tweets: AppTweet[] = []
   for (const instruction of instructions) {
+    // Only the list, never the pin: X repeats the pinned tweet as an entry of its own, out
+    // of order, and a stats page that read it would think the timeline had reached that far.
     for (const entry of getSlice(instruction, 'entries') ?? []) {
       if (isAdEntryId(getStr(entry, 'entryId'))) {
         continue
@@ -217,6 +219,43 @@ export const parseUserTweets = (instructions: unknown[]): AppTweet[] => {
     }
   }
   return tweets
+}
+
+// Cloudflare refuses UserByRestId to a cookie session, so the counts come off the timeline
+// the stats page already asks for: every card carries its author, and one of them is you.
+export const parseTimelineProfile = (instructions: unknown[], userId: string): AppProfile | undefined => {
+  for (const instruction of instructions) {
+    const entries = getSlice(instruction, 'entries') ?? [getMap(instruction, 'entry')]
+    for (const entry of entries) {
+      for (const result of collectTweetResultsFromEntry(entry)) {
+        const user = getMap(getMap(getMap(unwrapTweetResult(result), 'core'), 'user_results'), 'result')
+        if (user && getStr(user, 'rest_id') === userId) {
+          return mapProfile(user, userId)
+        }
+      }
+    }
+  }
+  return undefined
+}
+
+// X has moved the counts out of legacy and into fields of their own, and serves the old
+// shape to some sessions still, so both are read.
+const mapProfile = (user: Record<string, unknown>, id: string): AppProfile | undefined => {
+  const legacy = getMap(user, 'legacy')
+  const core = getMap(user, 'core')
+  const counts = getMap(user, 'relationship_counts')
+  const handle = getStr(core, 'screen_name') || getStr(legacy, 'screen_name')
+  if (handle === '') {
+    return undefined
+  }
+  return {
+    id,
+    handle,
+    name: getStr(core, 'name') || getStr(legacy, 'name') || handle,
+    followers: getInt(counts, 'followers') || getInt(legacy, 'followers_count'),
+    following: getInt(counts, 'following') || getInt(legacy, 'friends_count'),
+    posts: getInt(getMap(user, 'tweet_counts'), 'tweets') || getInt(legacy, 'statuses_count')
+  }
 }
 
 export const getTweetDetailInstructions = (result: unknown): unknown[] => {

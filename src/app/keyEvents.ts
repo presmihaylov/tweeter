@@ -72,6 +72,11 @@ export const pastedText = (key: AppKey): string | undefined => {
 export const isHelpKey = (key: AppKey): boolean =>
   !key.ctrl && key.meta !== true && (key.name === '?' || (key.shift === true && key.name === '/') || key.sequence === '?')
 
+// Shift+S opens the stats page. s already sorts the feed, and terminals disagree about how
+// a capital arrives: some name the shifted letter, some name the key and mark the Shift.
+export const isStatsKey = (key: AppKey): boolean =>
+  !key.ctrl && key.meta !== true && (key.name === 'S' || (key.shift === true && key.name === 's'))
+
 // How far the key popup moves. A short terminal cannot hold every key at once, so the same
 // keys that walk a list walk the popup, and the page keys jump a screen.
 export const helpScrollStep = (key: AppKey): number => {

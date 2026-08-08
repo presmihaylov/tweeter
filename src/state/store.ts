@@ -1,4 +1,6 @@
-import type { AppMedia, AppTweet, AppVideo, NotificationPage, NotificationRow } from '../twitter/types.ts'
+import type { AppMedia, AppProfile, AppTweet, AppVideo, NotificationPage, NotificationRow } from '../twitter/types.ts'
+import type { StatsRow, StatsTotals, StatsWindow } from '../stats/aggregate.ts'
+import { nextStatsWindow } from '../stats/aggregate.ts'
 
 export type FeedId = 'following' | 'forYou'
 
@@ -41,6 +43,22 @@ export type ConversationState = {
 
 export type LightboxState = { key: string; url: string; label: string; width?: number; height?: number }
 
+// What the stats page holds while it is up. The rows are already counted, because counting
+// them needs a clock and a follower log that the screen has no business reading.
+export type StatsState = {
+  open: boolean
+  window: StatsWindow
+  loading: boolean
+  error?: string
+  rows: StatsRow[]
+  totals?: StatsTotals
+  profile?: AppProfile
+  // The widest window the fetched pages already answer for. A window inside it needs no
+  // second read, so pressing w back and forth costs nothing.
+  loadedWindow?: StatsWindow
+  scroll: number
+}
+
 // Both writes are a draft against the tweet the reader is on, so one drawer serves both.
 // A reply answers that tweet; a quote reposts it with the draft on top.
 export type ComposerMode = 'reply' | 'quote' | 'post'
@@ -81,6 +99,10 @@ export type AppState = {
   // A short terminal cannot hold every key at once, so the popup scrolls. The screen owns
   // how far it can go, because only the screen knows how many rows it has.
   helpScroll: number
+  // The stats page, which counts what you wrote day by day. It keeps its own rows rather
+  // than reading the feed: the profile timeline is a different read, and a month of it does
+  // not belong in the tweet store the panes draw from.
+  stats: StatsState
   // What a copy left on the clipboard, shown in the corner for a moment. The status line
   // holds one line for the whole app, so a copy there would sit under the reader's eye at
   // the far end of the window and be gone before it is read.
@@ -103,8 +125,55 @@ export const initialAppState = (): AppState => ({
   textFocused: false,
   helpOpen: false,
   helpScroll: 0,
+  stats: { open: false, window: 7, loading: false, rows: [], scroll: 0 },
   status: 'starting'
 })
+
+export const toggleStats = (state: AppState): AppState => ({
+  ...state,
+  stats: { ...state.stats, open: !state.stats.open, scroll: 0 },
+  helpOpen: false
+})
+
+export const closeStats = (state: AppState): AppState =>
+  state.stats.open ? { ...state, stats: { ...state.stats, open: false, scroll: 0 } } : state
+
+// The window walks 7 → 14 → 30 and back. The rows it already has stay on the screen until
+// the wider read answers, so the page never blanks under the reader.
+export const turnStatsWindow = (state: AppState): AppState => ({
+  ...state,
+  stats: { ...state.stats, window: nextStatsWindow(state.stats.window), scroll: 0 }
+})
+
+export const beginStatsLoad = (state: AppState): AppState => ({
+  ...state,
+  stats: { ...state.stats, loading: true, error: undefined }
+})
+
+export const failStatsLoad = (state: AppState, error: string): AppState => ({
+  ...state,
+  stats: { ...state.stats, loading: false, error }
+})
+
+// The rows land page by page, so a merge can carry a table that is still filling in. Only
+// the last merge of a load clears the loading flag.
+export const mergeStats = (state: AppState, load: { rows: StatsRow[]; totals: StatsTotals; profile?: AppProfile; loadedWindow: StatsWindow; loading?: boolean }): AppState => ({
+  ...state,
+  stats: {
+    ...state.stats,
+    loading: load.loading ?? false,
+    error: undefined,
+    rows: load.rows,
+    totals: load.totals,
+    profile: load.profile ?? state.stats.profile,
+    loadedWindow: load.loadedWindow
+  }
+})
+
+export const scrollStats = (state: AppState, delta: number, max: number): AppState => {
+  const scroll = Math.max(0, Math.min(max, state.stats.scroll + delta))
+  return scroll === state.stats.scroll ? state : { ...state, stats: { ...state.stats, scroll } }
+}
 
 export const toggleHelp = (state: AppState): AppState => ({ ...state, helpOpen: !state.helpOpen, helpScroll: 0 })
 

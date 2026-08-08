@@ -5,6 +5,7 @@ import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize, fitCells } from '../media/geometry.ts'
 import { absoluteTime, relativeTime } from '../utils/time.ts'
+import { statsBodyLines } from './statsView.ts'
 
 export type MainScreen = {
   render(state: AppState, auth?: AuthStatus): void
@@ -15,6 +16,9 @@ export type MainScreen = {
   detailScrolls(): boolean
   // Which article image the pane is showing, for the key that enlarges one.
   visibleArticleImage(): { media: AppMedia; key: string } | undefined
+  // How far the stats card can scroll, which only the card knows: it is as tall as the
+  // window it was drawn in.
+  statsScrollMax(state: AppState): number
   destroy(): void
 }
 
@@ -22,6 +26,7 @@ export type MainScreenOptions = {
   onOpenPhoto?: (source: 'tweet' | 'quote', index?: number) => void
   onCloseLightbox?: () => void
   onCloseHelp?: () => void
+  onCloseStats?: () => void
   onOpenQuote?: () => void
   onOpenTweet?: (tweetId: string) => void
   onToggleReplies?: () => void
@@ -364,6 +369,7 @@ export const helpGroups: readonly HelpGroup[] = [
       { keys: 'v', what: 'play the video' },
       { keys: 'o', what: 'open in your browser' },
       { keys: 'y', what: 'copy the link to the clipboard' },
+      { keys: 'Shift+S', what: 'your stats, on and off' },
       { keys: '?', what: 'this popup, on and off' },
       { keys: 'q', what: 'quit' }
     ]
@@ -458,6 +464,24 @@ export const helpCardHeight = (terminalWidth: number, terminalHeight: number): n
     helpContentHeight(helpStacks(terminalWidth)) + helpChrome,
     terminalHeight
   )
+
+const statsPadding = 2
+
+// The border, and the padding the card puts on each side of its table.
+const statsChrome = 2 + statsPadding * 2
+
+// The stats card takes the size of its table rather than a share of the window: the table
+// is a fixed set of columns, and a card wider than them would be a frame around empty space.
+export const statsCardWidth = (lines: readonly string[], terminalWidth: number): number =>
+  clamp(Math.max(0, ...lines.map((line) => line.length)) + statsChrome, 24, terminalWidth)
+
+export const statsCardHeight = (lines: readonly string[], terminalHeight: number): number =>
+  clamp(lines.length + statsChrome, 5, terminalHeight)
+
+// Thirty days plus the head, the total and the notes outrun a short window, so what does
+// not fit scrolls, the way the key popup does.
+export const statsScrollMaxOf = (lines: readonly string[], terminalHeight: number): number =>
+  Math.max(0, lines.length + statsChrome - statsCardHeight(lines, terminalHeight))
 
 // One stack of every key needs about forty rows, which a short terminal does not have. What
 // does not fit scrolls, so no key is out of reach on any window.
@@ -1079,6 +1103,51 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   }
   helpPopup.onMouseDown = () => { opts.onCloseHelp?.() }
 
+  // The stats page floats the same way the key popup does, and for the same reason: the
+  // feed keeps its place while the numbers are read.
+  const statsPopup = new BoxRenderable(renderer, {
+    id: 'stats-popup',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 100,
+    shouldFill: false,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    visible: false
+  })
+  const statsCard = new BoxRenderable(renderer, {
+    id: 'stats-card',
+    width: 1,
+    height: 1,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: '#58a6ff',
+    title: ' Stats ',
+    titleAlignment: 'center',
+    bottomTitle: ' w changes the window · Esc closes ',
+    bottomTitleAlignment: 'center',
+    backgroundColor: '#0d1117',
+    padding: statsPadding,
+    overflow: 'hidden',
+    flexDirection: 'column',
+    alignItems: 'flex-start'
+  })
+  const statsText = new TextRenderable(renderer, {
+    id: 'stats-text',
+    content: '',
+    fg: '#c9d1d9',
+    width: 1,
+    height: 1,
+    flexShrink: 0
+  })
+  statsCard.add(statsText)
+  statsPopup.add(statsCard)
+  statsPopup.onMouseDown = () => { opts.onCloseStats?.() }
+
   // A copy leaves nothing on the screen to show for itself. The corner says so for a moment
   // and then goes, rather than the status line, which sits on the far bottom row.
   const toastBox = new BoxRenderable(renderer, {
@@ -1115,6 +1184,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   shell.add(status)
   shell.add(toastBox)
   shell.add(helpPopup)
+  shell.add(statsPopup)
   renderer.root.add(shell)
 
   // The terminal draws its own cursor, so the drawer only says which cell it belongs in.
@@ -1502,6 +1572,21 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       }
       helpPopup.visible = state.helpOpen
       helpOpen = state.helpOpen
+      statsPopup.visible = state.stats.open
+      if (state.stats.open) {
+        const lines = statsBodyLines({ ...state.stats, window: state.stats.window, now: now() })
+        const cardWidth = statsCardWidth(lines, renderer.terminalWidth)
+        const cardHeight = statsCardHeight(lines, renderer.terminalHeight)
+        statsCard.width = cardWidth
+        statsCard.height = cardHeight
+        statsCard.bottomTitle = statsScrollMaxOf(lines, renderer.terminalHeight) > 0
+          ? ' ↑ ↓ scrolls · w changes the window · Esc closes '
+          : ' w changes the window · Esc closes '
+        statsText.content = lines.join('\n')
+        statsText.width = cardWidth - statsChrome
+        statsText.height = lines.length
+        statsText.marginTop = -state.stats.scroll
+      }
       lightboxCaption.content = state.lightbox ? `${state.lightbox.label} · click or Esc to close` : ''
       lightboxSlot = state.lightbox
         ? { key: state.lightbox.key, url: state.lightbox.url, box: lightboxImage, pane: lightbox, width: state.lightbox.width, height: state.lightbox.height, minRows: mediaFloor }
@@ -1635,6 +1720,10 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     },
     detailScrolls() {
       return flowRows(detailItems) > detailBody.height
+    },
+    statsScrollMax(state: AppState) {
+      const lines = statsBodyLines({ ...state.stats, now: now() })
+      return statsScrollMaxOf(lines, renderer.terminalHeight)
     },
     // p enlarges a picture without a mouse, so it needs the one the reader can see.
     visibleArticleImage() {

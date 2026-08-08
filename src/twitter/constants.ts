@@ -84,8 +84,8 @@ export const retryDelaysFor = (code: number | undefined): readonly number[] => {
 }
 
 export const tweetDetailQueryIdFallbacks = ['97JF30KziU00483E_8elBA', 'aFvUsJm2c-oDkJV75blV6g'] as const
-// The two reads the stats page makes were added after the last known-good id set, so they
-// carry no fallback: discovery reads their ids off the x.com bundle like every other one.
-export const discoveredOperations = ['UserByRestId', 'UserTweetsAndReplies']
+// The read the stats page makes was added after the last known-good id set, so it carries
+// no fallback: discovery reads its id off the x.com bundle like every other one.
+export const discoveredOperations = ['UserTweetsAndReplies']
 
 export const targetOperations = [...Object.keys(fallbackQueryIds), ...discoveredOperations]

@@ -48,6 +48,9 @@ export type TimelinePage = {
   bottomCursor?: string
 }
 
+// A profile timeline, plus the account it belongs to. The two arrive in one answer.
+export type UserTimelinePage = TimelinePage & { profile?: AppProfile }
+
 // The account behind the cookies, as its profile page reports it. X gives the follower
 // count for right now and keeps no history of it, so the app samples it day by day.
 export type AppProfile = {

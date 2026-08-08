@@ -71,26 +71,6 @@ export const buildTimelineFeatures = (): FeatureMap => ({
 
 export const buildHomeTimelineFeatures = (): FeatureMap => buildTimelineFeatures()
 
-// A profile read declares its own set, and X refuses the call when one of them is missing.
-// These are the exact switches the x.com bundle names for UserByRestId.
-export const buildUserFeatures = (): FeatureMap => ({
-  hidden_profile_subscriptions_enabled: true,
-  profile_label_improvements_pcf_label_in_post_enabled: true,
-  responsive_web_profile_redirect_enabled: true,
-  rweb_tipjar_consumption_enabled: true,
-  verified_phone_label_enabled: false,
-  highlights_tweets_tab_ui_enabled: true,
-  responsive_web_twitter_article_notes_tab_enabled: true,
-  subscriptions_feature_can_gift_premium: true,
-  creator_subscriptions_tweet_preview_api_enabled: true,
-  responsive_web_graphql_timeline_navigation_enabled: true
-})
-
-export const buildUserFieldToggles = (): FeatureMap => ({
-  withPayments: false,
-  withAuxiliaryUserLabels: false
-})
-
 // The same, for the profile timeline. It asks for six switches the home timeline does not,
 // so it carries its own set rather than sharing that one.
 export const buildUserTweetsFeatures = (): FeatureMap => ({

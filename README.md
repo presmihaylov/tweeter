@@ -78,6 +78,7 @@ The card lays itself out for the window it opens in. It sits in the middle of th
 - `Shift+P` — write a new post; the same drawer opens with nothing behind it, `Enter` sends and `Esc` closes
 - `r` — reply to the open tweet; type, then `Enter` sends and `Esc` closes
 - `t` — repost the open tweet with your own words; the same drawer opens and posts a quote
+- `Shift+S` — your stats over the last 7, 14 or 30 days; `w` turns the window, `R` fetches again, `Esc` closes
 - `q` — quit
 
 The drawer is a text field. `←` / `→` move the caret, `Alt+←` / `Alt+→` jump a word, `Home` / `End` (or `Ctrl+A` / `Ctrl+E`) reach the two ends, and `Backspace` / `Delete` take the character on either side of it.
@@ -89,6 +90,12 @@ The drawer is a text field. `←` / `→` move the caret, `Alt+←` / `Alt+→` 
 `y` copies the open tweet's link, `https://x.com/handle/status/id`, to your system clipboard, ready to paste anywhere you share it. A copy leaves nothing on the screen to show for itself, so a green note comes up in the top right corner of the pane, `⧉ link copied`, and goes on its own after about two seconds; the status line keeps the whole link until the next key. A second copy restarts that clock rather than letting the note leave while you are still reading it. When the clipboard command is missing, the note says `⧉ copy failed` and the status line names the reason.
 
 `Shift+P` writes a new post of your own. It opens the same drawer as `r` and `t`, with the heading `New post` and no tweet behind it, so it works on an empty feed and leaves the feed selection where it was. `Enter` sends it as a plain tweet: one `CreateTweet` with no reply block and no attached link. The same 280-character counter, the same retry on X's transient refusals, and the same `Esc` apply.
+
+`Shift+S` floats your own numbers over the panes, the way `?` floats the key list, and closes the same way. One row per day, newest first: posts, replies, impressions and the follower change, with a total under the rule and your handle, follower, following and post counts above it. `w` turns the window through 7, 14 and 30 days; a wider window costs one fetch and a narrower one is counted again from what the wider one already read. `R` throws that away and fetches from the top. `↑` / `↓` scroll when the window is too short for the table.
+
+The numbers come from your own profile timeline, which tweeter pages back through until it passes the oldest day of the window, up to two pages for each day of it. X serves about 36 cards per page whatever the request asks for, so a month of a busy account costs a dozen or so pages and about ten seconds. The rows fill in as the pages land rather than after the last one, so the table is readable while it grows. Posts and replies are what you wrote that day, so a repost of somebody else's tweet and a tweet you only appear in are left out. Impressions are the views X reports so far on what you wrote that day, not the views the day itself drew; a tweet keeps collecting them after the day ends. A day the pages never reached shows `·` rather than a row of zeros.
+
+The follower change needs a second reading. X reports the count for right now and keeps no history of it, so tweeter writes the count down in `~/.config/tweeter/followers.json` every time the page opens, and a day can only name a change when the day before it has a count too. The file starts empty, so the column fills in from the day you first open the page, and it keeps 120 days. A day you never ran tweeter shows `·`.
 
 A tweet with several photos draws them side by side, up to the four X allows. Click one to enlarge it.
 
@@ -248,13 +255,14 @@ Implemented:
 - `Shift+P` writes a new post of your own, in the same drawer, with no tweet behind it
 - `Shift+Enter` (or `Alt+Enter`) starts a new line in the drawer, while `Enter` still sends
 - `y` copies the open tweet's link to the system clipboard, with a green note in the top right corner of the pane that goes on its own
+- `Shift+S` floats a stats page over the panes: posts, replies, impressions and the follower change per day over 7, 14 or 30 days, counted from your profile timeline, with the follower count sampled daily into `~/.config/tweeter/followers.json` because X keeps no history of it
 - `?` floats a centred key popup over the panes, in three columns that collapse to two and then one on a narrow terminal, and scroll when the window is too short
 - `R` refreshes from the top cursor and prepends what is new, while the older pages page in from the bottom cursor on their own as the selection nears the end
 - a Notifications tab on `Tab`, off the old REST `notifications/all.json`: mentions as ordinary tweet cards, everything else as X's own aggregated line with a `♥`/`↻`/`⊕`/`◆` glyph and an avatar, every tweet shortcut acting on the row under the cursor
 - `Enter` on a notification line that stands for a list, such as the bell line or an aggregated like, fetches that list and draws it as cards under the line
 - the unread badge from `badge_count.json` in the header, read only, so x.com stays the one thing that clears it
 - automatic retry with backoff on X's transient write refusal (error 344) and on its automation gate (error 226, up to 5 retries over 230s), for replies, likes and bookmarks
-- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, notifications, the key popup and its reflow, the cookie write path and its refusal codes, OAuth flow, media helpers
+- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, notifications, the key popup and its reflow, the stats page and its day counting, the cookie write path and its refusal codes, OAuth flow, media helpers
 
 Live X GraphQL endpoints can still break when operation IDs or response shapes change; query ID refresh and tests are set up to make those failures visible. Replies additionally depend on X's automation heuristic, which X can tighten at any time.
 
