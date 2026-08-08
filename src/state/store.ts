@@ -43,7 +43,7 @@ export type LightboxState = { key: string; url: string; label: string; width?: n
 
 // Both writes are a draft against the tweet the reader is on, so one drawer serves both.
 // A reply answers that tweet; a quote reposts it with the draft on top.
-export type ComposerMode = 'reply' | 'quote'
+export type ComposerMode = 'reply' | 'quote' | 'post'
 
 // Where the next character lands, counted in characters from the start of the draft. The
 // drawer is a text field, so a keystroke acts here and not at the end of the draft.
@@ -359,6 +359,15 @@ export const mergeFocalTweet = (state: AppState, focal: AppTweet): AppState => {
 // The drawer writes against the open tweet, not the timeline cursor, so a quote of a
 // drilled-in tweet quotes that tweet.
 export const openComposer = (state: AppState, mode: ComposerMode): AppState => {
+  // A new post answers no tweet, so the drawer opens with nothing behind it and the feed
+  // selection stays where it was.
+  if (mode === 'post') {
+    return {
+      ...state,
+      composer: { open: true, mode, targetTweetId: undefined, draft: '', caret: 0, sending: false },
+      status: 'writing a new post'
+    }
+  }
   const target = focusedTweet(state)
   if (!target) {
     return state

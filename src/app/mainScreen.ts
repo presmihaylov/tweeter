@@ -1,5 +1,5 @@
 import { BoxRenderable, CliRenderEvents, TextRenderable, type CliRenderer, type Renderable } from '@opentui/core'
-import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, repliesOpen, replyIdsOf, type AppState, type ConversationState, type FeedSort, type NotificationsState, type TabId } from '../state/store.ts'
+import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, repliesOpen, replyIdsOf, type AppState, type ComposerMode, type ConversationState, type FeedSort, type NotificationsState, type TabId } from '../state/store.ts'
 import type { AppMedia, AppNotice, AppTweet, AuthStatus, NoticeIcon, NotificationRow, WriteRetryNotice } from '../twitter/types.ts'
 import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
@@ -357,6 +357,7 @@ export const helpGroups: readonly HelpGroup[] = [
     entries: [
       { keys: 'l', what: 'like, or take the like back' },
       { keys: 'b', what: 'bookmark, or take it off' },
+      { keys: 'Shift+P', what: 'write a new post' },
       { keys: 'r', what: 'reply' },
       { keys: 't', what: 'repost with your own words' },
       { keys: 'p', what: 'enlarge a photo' },
@@ -1872,13 +1873,20 @@ export const repliesHint = (tweet: AppTweet | undefined, depth: number): string 
   return parts.join('  ·  ')
 }
 
+const composerLead = (mode: ComposerMode, who: string): string => {
+  if (mode === 'post') {
+    return 'New post'
+  }
+  return mode === 'quote' ? `Quoting ${who}` : `Replying to ${who}`
+}
+
 // The handle says whose tweet the draft answers or reposts, and the count says whether X
 // will take it. A draft over the limit is refused, so the counter turns into the warning.
 export const composerHeading = (state: AppState): string => {
   const id = state.composer.targetTweetId
   const target = id ? state.tweets[id] : undefined
   const who = target ? `@${target.author.handle}` : (id ?? 'tweet')
-  const lead = state.composer.mode === 'quote' ? `Quoting ${who}` : `Replying to ${who}`
+  const lead = composerLead(state.composer.mode, who)
   const used = state.composer.draft.trim().length
   const count = used > tweetTextLimit ? `${used}/${tweetTextLimit} too long` : `${used}/${tweetTextLimit}`
   if (state.composer.sending) {

@@ -75,6 +75,7 @@ The card lays itself out for the window it opens in. It sits in the middle of th
 - `y` — copy the open tweet's link to your clipboard, to share it
 - `l` — like the open tweet, or take the like back
 - `b` — bookmark the open tweet, or take the bookmark off
+- `Shift+P` — write a new post; the same drawer opens with nothing behind it, `Enter` sends and `Esc` closes
 - `r` — reply to the open tweet; type, then `Enter` sends and `Esc` closes
 - `t` — repost the open tweet with your own words; the same drawer opens and posts a quote
 - `q` — quit
@@ -84,6 +85,8 @@ The drawer is a text field. `←` / `→` move the caret, `Alt+←` / `Alt+→` 
 `Cmd+V` pastes. The terminal, not tweeter, sees that key, so tweeter turns on bracketed paste at startup and turns it off on the way out; the terminal then wraps the clipboard in markers and the whole text arrives as one piece rather than as a run of keystrokes. That matters for more than speed: an unmarked newline arrives as `Enter`, which would send the draft half written. A terminal that will not mark a paste still works, because a run of characters that does not start an escape sequence is read as a paste too. Either way the line breaks become spaces, the trailing one is dropped, and the rest of the control characters come out, since the drawer holds one line.
 
 `y` copies the open tweet's link, `https://x.com/handle/status/id`, to your system clipboard, ready to paste anywhere you share it. A copy leaves nothing on the screen to show for itself, so a green note comes up in the top right corner of the pane, `⧉ link copied`, and goes on its own after about two seconds; the status line keeps the whole link until the next key. A second copy restarts that clock rather than letting the note leave while you are still reading it. When the clipboard command is missing, the note says `⧉ copy failed` and the status line names the reason.
+
+`Shift+P` writes a new post of your own. It opens the same drawer as `r` and `t`, with the heading `New post` and no tweet behind it, so it works on an empty feed and leaves the feed selection where it was. `Enter` sends it as a plain tweet: one `CreateTweet` with no reply block and no attached link. The same 280-character counter, the same retry on X's transient refusals, and the same `Esc` apply.
 
 A tweet with several photos draws them side by side, up to the four X allows. Click one to enlarge it.
 
@@ -240,6 +243,7 @@ Implemented:
 - normalized state reducer/store helpers
 - `l` to like or unlike the open tweet, drawn as a filled `♥` on the count, applied optimistically and rolled back on refusal
 - `b` to bookmark or unbookmark the open tweet, drawn as a `⚑` on the card, applied the same way
+- `Shift+P` writes a new post of your own, in the same drawer, with no tweet behind it
 - `y` copies the open tweet's link to the system clipboard, with a green note in the top right corner of the pane that goes on its own
 - `?` floats a centred key popup over the panes, in three columns that collapse to two and then one on a narrow terminal, and scroll when the window is too short
 - `R` refreshes from the top cursor and prepends what is new, while the older pages page in from the bottom cursor on their own as the selection nears the end

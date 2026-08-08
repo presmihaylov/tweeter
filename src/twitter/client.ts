@@ -265,6 +265,11 @@ export class TwitterClient {
     return this.createTweet({ attachment_url: statusUrl(args.handle, args.tweetId) }, args.text, args.onRetry)
   }
 
+  // A new post is the same CreateTweet with nothing added: no reply block and no attachment.
+  async postTweet(args: { text: string; onRetry?: (notice: WriteRetryNotice) => void }): Promise<PostResult> {
+    return this.createTweet({}, args.text, args.onRetry)
+  }
+
   private async createTweet(extra: Record<string, unknown>, text: string, onRetry?: (notice: WriteRetryNotice) => void): Promise<PostResult> {
     const variables: Record<string, unknown> = {
       tweet_text: text,

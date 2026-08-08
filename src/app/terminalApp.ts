@@ -1,10 +1,10 @@
 import { CliRenderEvents, createCliRenderer, decodePasteBytes } from '@opentui/core'
-import type { AppMedia, AuthStatus, NotificationRow, PostResult, WriteRetryNotice } from '../twitter/types.ts'
+import type { AppMedia, AppTweet, AuthStatus, NotificationRow, PostResult, WriteRetryNotice } from '../twitter/types.ts'
 import { TwitterClient } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, clearToast, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, repliesOpen, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, selectRelativeTweet, setFeedSort, showToast, toggleHelp, toggleLightbox, toggleReplies, videoOf, type AppState, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
+import { applyBookmark, applyLike, beginConversationLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, clearToast, collapseNotice, deleteFromDraft, enterSelection, expandNotice, failConversationLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, repliesOpen, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, selectRelativeTweet, setFeedSort, showToast, toggleHelp, toggleLightbox, toggleReplies, videoOf, type AppState, type ComposerMode, type FeedId, type TabId, type TimelineState } from '../state/store.ts'
 import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
@@ -63,6 +63,34 @@ export const notificationLoadResult = (mode: FeedLoad, added: number): string =>
     return added > 0 ? `${added} older notifications` : 'no older notifications'
   }
   return `loaded ${added} notifications`
+}
+
+// What the drawer calls the draft, in the status line and in a failure.
+export const composerWhat = (mode: ComposerMode): string => {
+  if (mode === 'post') {
+    return 'post'
+  }
+  return mode === 'quote' ? 'quote' : 'reply'
+}
+
+// Only the three calls the drawer needs, so a test can stand in for the client.
+export type DraftSender = {
+  replyToTweet: (args: { tweetId: string; text: string; onRetry?: (notice: WriteRetryNotice) => void }) => Promise<PostResult>
+  quoteTweet: (args: { tweetId: string; handle: string; text: string; onRetry?: (notice: WriteRetryNotice) => void }) => Promise<PostResult>
+  postTweet: (args: { text: string; onRetry?: (notice: WriteRetryNotice) => void }) => Promise<PostResult>
+}
+
+// The mode picks the call. A new post carries no tweet, and the drawer refuses to send a
+// reply or a quote whose tweet it lost, so a missing target here can only be a new post.
+export const sendDraft = (args: { client: DraftSender; mode: ComposerMode; target?: AppTweet; text: string; onRetry: (notice: WriteRetryNotice) => void }): Promise<PostResult> => {
+  const { client, mode, target, text, onRetry } = args
+  if (mode === 'post' || target === undefined) {
+    return client.postTweet({ text, onRetry })
+  }
+  if (mode === 'quote') {
+    return client.quoteTweet({ tweetId: target.id, handle: target.author.handle, text, onRetry })
+  }
+  return client.replyToTweet({ tweetId: target.id, text, onRetry })
 }
 
 // Tab walks the three tabs in the order the rail lists them, and wraps at the end.
@@ -423,9 +451,10 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       const targetId = state.composer.targetTweetId
       const target = targetId ? state.tweets[targetId] : undefined
       const mode = state.composer.mode
-      const what = mode === 'quote' ? 'quote' : 'reply'
+      const what = composerWhat(mode)
       const text = state.composer.draft.trim()
-      if (!target || text === '') {
+      // A new post answers no tweet, so it is the one mode that needs no target.
+      if ((!target && mode !== 'post') || text === '') {
         return
       }
       // X counts the characters itself, but a local check saves a round trip and keeps
@@ -438,20 +467,18 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
       state = { ...state, composer: { ...state.composer, sending: true, error: undefined }, status: `sending ${what}` }
       rerender()
-      await debugLogger.log('ui.composer.submit', { mode, targetTweetId: target.id, textLength: text.length })
+      await debugLogger.log('ui.composer.submit', { mode, targetTweetId: target?.id, textLength: text.length })
       const onRetry = (notice: WriteRetryNotice): void => {
         state = { ...state, status: retryStatus(what, notice) }
         rerender()
       }
-      const result: PostResult = mode === 'quote'
-        ? await client.quoteTweet({ tweetId: target.id, handle: target.author.handle, text, onRetry })
-        : await client.replyToTweet({ tweetId: target.id, text, onRetry })
+      const result: PostResult = await sendDraft({ client, mode, target, text, onRetry })
       if (result.ok) {
         state = { ...closeComposer(state, `sent ${what} ${result.tweetId}`) }
         rerender()
         return
       }
-      await debugLogger.log('ui.composer.failed', { mode, targetTweetId: target.id, error: result.error, status: result.status, code: result.code, logPath: debugLogger.path })
+      await debugLogger.log('ui.composer.failed', { mode, targetTweetId: target?.id, error: result.error, status: result.status, code: result.code, logPath: debugLogger.path })
       const failure = writeFailure(what, result, debugLogger.path)
       state = { ...state, composer: { ...state.composer, sending: false, error: failure.error }, status: failure.status }
       rerender()
@@ -676,6 +703,12 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       // the plain repost is the one write the TUI does not do.
       if (key.name === 't') {
         state = openComposer(state, 'quote')
+        rerender()
+        return
+      }
+      // A new post answers no tweet, so Shift+P opens the same drawer with nothing behind it.
+      if (key.name === 'P' || (key.shift && key.name === 'p')) {
+        state = openComposer(state, 'post')
         rerender()
         return
       }
