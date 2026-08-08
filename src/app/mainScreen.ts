@@ -1,6 +1,6 @@
 import { BoxRenderable, CliRenderEvents, TextRenderable, type CliRenderer, type Renderable } from '@opentui/core'
-import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, relationOf, repliesOpen, replyIdsOf, searchQueryOf, tabOrder, type AppState, type ComposerMode, type ConversationState, type FeedSort, type NotificationsState, type TabId, type TimelineId } from '../state/store.ts'
-import type { AppMedia, AppNotice, AppTweet, AuthStatus, NoticeIcon, NotificationRow, UserRelation, WriteRetryNotice } from '../twitter/types.ts'
+import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, relationOf, repliesOpen, replyIdsOf, searchQueryOf, tabOrder, type AppState, type ComposerMode, type ConversationState, type FeedSort, type MentionsState, type NotificationsState, type TabId, type TimelineId } from '../state/store.ts'
+import type { AppMedia, AppNotice, AppTweet, AuthStatus, MentionUser, NoticeIcon, NotificationRow, UserRelation, WriteRetryNotice } from '../twitter/types.ts'
 import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize, fitCells } from '../media/geometry.ts'
@@ -384,11 +384,13 @@ export const helpGroups: readonly HelpGroup[] = [
       { keys: 'Shift+Enter', what: 'start a new line' },
       { keys: 'Esc', what: 'close and keep the draft' },
       { keys: 'Cmd+V', what: 'paste the clipboard' },
+      { keys: '@', what: 'tag an account' },
       { keys: '← / →', what: 'move the caret' },
       { keys: 'Alt+← / Alt+→', what: 'jump a word' },
       { keys: 'Home / End', what: 'the two ends of the line' },
       { keys: 'Ctrl+A / Ctrl+E', what: 'the same two ends' },
-      { keys: 'Backspace / Delete', what: 'take a character either side' }
+      { keys: 'Backspace', what: 'take the character before' },
+      { keys: 'Delete', what: 'take the character after' }
     ]
   }
 ]
@@ -964,8 +966,19 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     flexGrow: 1,
     wrapMode: 'word'
   })
+  // The @ menu sits under the draft rather than over it, because a box over the drawer would
+  // cover the row the reader is typing on.
+  const composerMenu = new TextRenderable(renderer, {
+    id: 'composer-mentions',
+    content: '',
+    fg: '#58a6ff',
+    width: '100%',
+    height: 0,
+    visible: false
+  })
   composer.add(composerTitle)
   composer.add(composerText)
+  composer.add(composerMenu)
 
   const status = new BoxRenderable(renderer, {
     id: 'status-bar',
@@ -1689,8 +1702,12 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       // its own pad, then the border and the pad of the drawer.
       const composerWidth = composerText.width > 0 ? composerText.width : renderer.terminalWidth - 6
       const drawer = composerBody(state.composer.draft, state.composer.error, composerWidth, state.composer.caret)
-      composer.height = drawer.height
+      const menu = mentionMenuLines(state.mentions, composerWidth)
+      composer.height = drawer.height + menu.length
       composerText.content = drawer.text
+      composerMenu.height = menu.length
+      composerMenu.visible = menu.length > 0
+      composerMenu.content = menu.join('\n')
       caret = state.composer.open ? { row: drawer.caretRow, col: drawer.caretCol } : undefined
       const toast = state.toast
       toastBox.visible = toast !== undefined
@@ -2021,6 +2038,35 @@ export const composerHeading = (state: AppState): string => {
     return `${lead} · sending…`
   }
   return `${lead} · ${count} · Enter sends · Esc closes`
+}
+
+// How many accounts the @ menu shows at once. More rows would push the draft off a short
+// window, and the reader types another letter rather than walk a long list.
+export const mentionMenuCap = 5
+
+// One account as the menu offers it. The handle is what goes in the draft, so it leads, and
+// what stands between you and the account comes last because a narrow drawer cuts the end.
+const mentionRow = (user: MentionUser, chosen: boolean, width: number): string => {
+  const verified = user.verified === true ? ' ✓' : ''
+  const relation = user.following === true ? '  ·  following' : ''
+  const line = `${chosen ? '▸' : ' '} @${user.handle}${verified}  ${user.name}${relation}`
+  return line.length > width ? `${line.slice(0, Math.max(1, width - 1))}…` : line
+}
+
+// The menu under the draft. It says which mention it is answering, because the caret may be
+// several rows above it by then.
+export const mentionMenuLines = (mentions: MentionsState | undefined, width: number): string[] => {
+  if (!mentions) {
+    return []
+  }
+  const head = `@${mentions.query}  ·  ↑↓ pick  ·  Enter tags  ·  Esc closes the menu`
+  const users = mentions.users
+  if (users.length === 0) {
+    return [head, mentions.loading ? '  looking for accounts…' : '  no accounts under that name']
+  }
+  // The chosen row is always drawn, so a walk past the fifth account moves the window on.
+  const first = Math.max(0, Math.min(mentions.index - mentionMenuCap + 1, users.length - mentionMenuCap))
+  return [head, ...users.slice(first, first + mentionMenuCap).map((user, offset) => mentionRow(user, first + offset === mentions.index, width))]
 }
 
 // The drawer holds a border, a pad on each side and the heading, so a draft of one row

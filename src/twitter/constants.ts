@@ -71,6 +71,17 @@ export const friendshipParams: Readonly<Record<string, string>> = {
   skip_status: '1'
 }
 
+// What x.com sends with the typeahead read behind its own @ menu. src names where the text
+// was typed, and the result type keeps the answer to accounts: the same endpoint also serves
+// topics, events and hashtags, which cannot be tagged in a tweet.
+export const typeaheadParams: Readonly<Record<string, string>> = {
+  include_ext_is_blue_verified: '1',
+  include_ext_verified_type: '1',
+  include_ext_profile_image_shape: '1',
+  src: 'compose',
+  result_type: 'users'
+}
+
 // X answers a second like on the same tweet with this code. The like the caller asked for
 // is already on the tweet, so the call did its job and the code is not a failure. A second
 // bookmark answers with the same code, and with the same "already favorited" wording.

@@ -1,6 +1,7 @@
-import type { AppMedia, AppProfile, AppTweet, AppVideo, NotificationPage, NotificationRow, UserRelation } from '../twitter/types.ts'
+import type { AppMedia, AppProfile, AppTweet, AppVideo, MentionUser, NotificationPage, NotificationRow, UserRelation } from '../twitter/types.ts'
 import type { StatsRow, StatsTotals, StatsWindow } from '../stats/aggregate.ts'
 import { nextStatsWindow } from '../stats/aggregate.ts'
+import { applyMention, mentionQuery } from './mentions.ts'
 
 export type FeedId = 'following' | 'forYou'
 
@@ -83,6 +84,10 @@ export type ComposerMode = WriteMode | 'search'
 // drawer is a text field, so a keystroke acts here and not at the end of the draft.
 export type CaretMove = 'left' | 'right' | 'start' | 'end' | 'wordLeft' | 'wordRight'
 
+// The accounts on offer for the @ the caret sits in. The query is kept beside them because
+// the reader keeps typing while the read runs, and an answer to an older query is stale.
+export type MentionsState = { query: string; users: MentionUser[]; index: number; loading: boolean }
+
 export type AppState = {
   tweets: Record<string, AppTweet>
   // What stands between you and each account you have seen, keyed by user id. It sits here
@@ -101,6 +106,9 @@ export type AppState = {
   // the tweet it is about, and focusedTweetId reads it from here while that tab is up.
   selectedRowKey?: string
   composer: { open: boolean; mode: ComposerMode; targetTweetId?: string; draft: string; caret: number; error?: string; sending: boolean }
+  // The @ menu over the drawer. It is absent unless the caret sits in a mention, so the one
+  // field says both whether the menu is up and what it is offering.
+  mentions?: MentionsState
   lightbox?: LightboxState
   // Quoted tweets and replies are not in the timeline, so drilling into one pushes here
   // instead of moving the timeline cursor. The top of the stack is what the pane shows.
@@ -564,6 +572,7 @@ export const openComposer = (state: AppState, mode: ComposerMode): AppState => {
     return {
       ...state,
       composer: { open: true, mode, targetTweetId: undefined, draft: '', caret: 0, sending: false },
+      mentions: undefined,
       status: mode === 'search' ? 'type a search' : 'writing a new post'
     }
   }
@@ -574,15 +583,82 @@ export const openComposer = (state: AppState, mode: ComposerMode): AppState => {
   return {
     ...state,
     composer: { open: true, mode, targetTweetId: target.id, draft: '', caret: 0, sending: false },
+    mentions: undefined,
     status: mode === 'quote' ? `quoting @${target.author.handle}` : `replying to @${target.author.handle}`
   }
 }
 
 export const closeComposer = (state: AppState, status = 'composer closed'): AppState =>
-  ({ ...state, composer: { open: false, mode: state.composer.mode, draft: '', caret: 0, sending: false }, status })
+  ({ ...state, composer: { open: false, mode: state.composer.mode, draft: '', caret: 0, sending: false }, mentions: undefined, status })
 
-const withDraft = (state: AppState, draft: string, caret: number): AppState =>
-  ({ ...state, composer: { ...state.composer, draft, caret: Math.max(0, Math.min(draft.length, caret)) } })
+// The menu follows the caret, so every change to the draft asks the same question: is the
+// caret in a mention, and is it still the same one. A menu already open on that query keeps
+// the accounts it holds, so a keystroke does not blank the list while the next read runs.
+const mentionsFor = (state: AppState, draft: string, caret: number): MentionsState | undefined => {
+  const query = mentionQuery(draft, caret)
+  if (query === undefined) {
+    return undefined
+  }
+  return state.mentions?.query === query ? state.mentions : { query, users: [], index: 0, loading: true }
+}
+
+const withDraft = (state: AppState, draft: string, caret: number): AppState => {
+  const safeCaret = Math.max(0, Math.min(draft.length, caret))
+  return { ...state, composer: { ...state.composer, draft, caret: safeCaret }, mentions: mentionsFor(state, draft, safeCaret) }
+}
+
+// The query the drawer is waiting on, if it is waiting on one. The read costs a request per
+// query, so the app asks this rather than fetch on every keystroke.
+export const needsMentions = (state: AppState): string | undefined =>
+  state.mentions?.loading === true ? state.mentions.query : undefined
+
+// An answer to a query the reader has already typed past is thrown away. The accounts carry
+// both relationship flags, so they fill the same map a follow moves.
+export const mergeMentionUsers = (state: AppState, query: string, users: MentionUser[]): AppState => {
+  if (state.mentions?.query !== query) {
+    return state
+  }
+  const relations = { ...state.relations }
+  for (const user of users) {
+    const relation: UserRelation = {}
+    if (user.following !== undefined) {
+      relation.following = user.following
+    }
+    if (user.followedBy !== undefined) {
+      relation.followedBy = user.followedBy
+    }
+    if (user.id !== '' && Object.keys(relation).length > 0) {
+      relations[user.id] = { ...relations[user.id], ...relation }
+    }
+  }
+  return { ...state, relations, mentions: { query, users, index: 0, loading: false } }
+}
+
+// The list is short and the reader walks it with the same keys everywhere else, so it wraps
+// rather than stop at either end.
+export const moveMention = (state: AppState, step: number): AppState => {
+  const mentions = state.mentions
+  if (!mentions || mentions.users.length === 0) {
+    return state
+  }
+  const count = mentions.users.length
+  const index = (((mentions.index + step) % count) + count) % count
+  return { ...state, mentions: { ...mentions, index } }
+}
+
+export const closeMentions = (state: AppState): AppState =>
+  state.mentions ? { ...state, mentions: undefined } : state
+
+// The handle takes the place of what was typed. The menu closes with it, because the caret
+// then sits after a space and no longer in a mention.
+export const chooseMention = (state: AppState): AppState => {
+  const chosen = state.mentions?.users[state.mentions.index]
+  if (!chosen) {
+    return state
+  }
+  const written = applyMention(state.composer.draft, state.composer.caret, chosen.handle)
+  return { ...withDraft(state, written.draft, written.caret), status: `tagged @${chosen.handle}` }
+}
 
 export const insertIntoDraft = (state: AppState, text: string): AppState => {
   const { draft, caret } = state.composer

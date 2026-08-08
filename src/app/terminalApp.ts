@@ -1,10 +1,10 @@
 import { CliRenderEvents, createCliRenderer, decodePasteBytes } from '@opentui/core'
-import type { AppMedia, AppProfile, AppTweet, AuthStatus, NotificationRow, PostResult, TimelinePage, WriteRetryNotice } from '../twitter/types.ts'
+import type { AppMedia, AppProfile, AppTweet, AuthStatus, MentionUser, NotificationRow, PostResult, TimelinePage, WriteRetryNotice } from '../twitter/types.ts'
 import { TwitterClient, userIdFromCookies } from '../twitter/client.ts'
 import { tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { addSearchTab, applyBookmark, applyFollow, applyLike, beginConversationLoad, beginStatsLoad, clearDetailSelection, closeComposer, closeHelp, closeReplies, closeStats, clearToast, collapseNotice, deleteFromDraft, emptyTimeline, enterSelection, expandNotice, failConversationLoad, failStatsLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, isSearchTab, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeNotificationsPage, mergeStats, mergeTimelinePage, moveComposerCaret, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, relationOf, removeSearchTab, repliesOpen, searchQueryOf, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, scrollStats, selectRelativeTweet, setFeedSort, showToast, tabOrder, toggleHelp, toggleLightbox, toggleReplies, toggleStats, turnStatsWindow, videoOf, type AppState, type TabId, type TimelineId, type TimelineState, type WriteMode } from '../state/store.ts'
+import { addSearchTab, applyBookmark, applyFollow, applyLike, beginConversationLoad, beginStatsLoad, chooseMention, clearDetailSelection, closeComposer, closeHelp, closeMentions, closeReplies, closeStats, clearToast, collapseNotice, deleteFromDraft, emptyTimeline, enterSelection, expandNotice, failConversationLoad, failStatsLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, isSearchTab, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeMentionUsers, mergeNotificationsPage, mergeStats, mergeTimelinePage, moveComposerCaret, moveMention, needsMentions, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, relationOf, removeSearchTab, repliesOpen, searchQueryOf, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, scrollStats, selectRelativeTweet, setFeedSort, showToast, tabOrder, toggleHelp, toggleLightbox, toggleReplies, toggleStats, turnStatsWindow, videoOf, type AppState, type TabId, type TimelineId, type TimelineState, type WriteMode } from '../state/store.ts'
 import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
@@ -26,6 +26,12 @@ export type FeedLoad = 'initial' | 'newer' | 'older'
 export const toastLife = 2200
 
 export const copyMark = '⧉'
+
+// How long the drawer waits after a keystroke before it asks X who the @ names, and how many
+// accounts it asks for. The wait is short enough to feel like typing and long enough that a
+// word costs one request rather than one per letter.
+export const mentionDelayMs = 180
+export const mentionCount = 10
 
 export const cursorFor = (timeline: TimelineState | undefined, mode: FeedLoad): string | undefined => {
   if (mode === 'newer') {
@@ -237,10 +243,27 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }, 300)
     }
 
+    // The @ menu waits for a pause in the typing before it asks X, the way the replies wait
+    // for the cursor to rest.
+    let mentionTimer: ReturnType<typeof setTimeout> | undefined
+    const scheduleMentions = (): void => {
+      clearTimeout(mentionTimer)
+      const query = needsMentions(state)
+      if (query === undefined) {
+        return
+      }
+      mentionTimer = setTimeout(() => {
+        if (needsMentions(state) === query) {
+          void loadMentions(query)
+        }
+      }, mentionDelayMs)
+    }
+
     const rerender = (): void => {
       screen.render(state, session.auth)
       scheduleReplies()
       scheduleOlderTweets()
+      scheduleMentions()
     }
     // Pane heights drive the detail row budget, so a resize needs a fresh pass.
     renderer.on(CliRenderEvents.RESIZE, rerender)
@@ -638,6 +661,20 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       rerender()
     }
 
+    // A query already answered is served from what came back, because a Backspace walks the
+    // reader back over queries they just passed through.
+    const mentionCache = new Map<string, MentionUser[]>()
+
+    const loadMentions = async (query: string): Promise<void> => {
+      const cached = mentionCache.get(query)
+      const users = cached ?? await client.searchUsers({ query, count: mentionCount })
+      if (users.length > 0) {
+        mentionCache.set(query, users)
+      }
+      state = mergeMentionUsers(state, query, users)
+      rerender()
+    }
+
     const sendComposer = async (): Promise<void> => {
       const targetId = state.composer.targetTweetId
       const target = targetId ? state.tweets[targetId] : undefined
@@ -759,8 +796,10 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
         renderer.destroy()
         return
       }
+      // Esc closes the @ menu first. The draft is still being written, so throwing it away
+      // over a menu the reader only wanted out of the way would cost them the whole reply.
       if (key.name === 'escape') {
-        state = closeComposer(state)
+        state = state.mentions ? closeMentions(state) : closeComposer(state)
         rerender()
         return
       }
@@ -770,6 +809,21 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
           state = insertIntoDraft(state, '\n')
           rerender()
           return
+        }
+        // The @ menu takes the keys that walk a list and the key that picks from one, while
+        // it is up. It is only up while the caret sits in a mention, so Enter still sends
+        // every other draft.
+        if (state.mentions) {
+          if (key.name === 'down' || key.name === 'up') {
+            state = moveMention(state, key.name === 'down' ? 1 : -1)
+            rerender()
+            return
+          }
+          if (state.mentions.users.length > 0 && (key.name === 'tab' || isEnterKey(key))) {
+            state = chooseMention(state)
+            rerender()
+            return
+          }
         }
         if (isCtrlEnterKey(key) || isEnterKey(key)) {
           void sendComposer()

@@ -90,6 +90,8 @@ The drawer is a text field. `←` / `→` move the caret, `Alt+←` / `Alt+→` 
 
 `Cmd+V` pastes. The terminal, not tweeter, sees that key, so tweeter turns on bracketed paste at startup and turns it off on the way out; the terminal then wraps the clipboard in markers and the whole text arrives as one piece rather than as a run of keystrokes. That matters for more than speed: an unmarked newline arrives as `Enter`, which would send the draft half written. A terminal that will not mark a paste still works, because a run of characters that does not start an escape sequence is read as a paste too. Either way the line breaks become spaces, the trailing one is dropped, and the rest of the control characters come out; a break you want in the draft is a `Shift+Enter` away.
 
+`@` and a letter or two open a list of accounts under the draft. `↑` / `↓` walk it, `Enter` or `Tab` writes the chosen handle in, and `Esc` closes the list and leaves the draft alone.
+
 `y` copies the open tweet's link, `https://x.com/handle/status/id`, to your system clipboard, ready to paste anywhere you share it. A copy leaves nothing on the screen to show for itself, so a green note comes up in the top right corner of the pane, `⧉ link copied`, and goes on its own after about two seconds; the status line keeps the whole link until the next key. A second copy restarts that clock rather than letting the note leave while you are still reading it. When the clipboard command is missing, the note says `⧉ copy failed` and the status line names the reason.
 
 `Shift+P` writes a new post of your own. It opens the same drawer as `r` and `t`, with the heading `New post` and no tweet behind it, so it works on an empty feed and leaves the feed selection where it was. `Enter` sends it as a plain tweet: one `CreateTweet` with no reply block and no attached link. The same 280-character counter, the same retry on X's transient refusals, and the same `Esc` apply.
@@ -204,6 +206,14 @@ Error 226 is the other refusal, and it is a different animal. It means the autom
 
 `b` bookmarks the open tweet and `b` again takes the bookmark off, through `CreateBookmark` and `DeleteBookmark`. It behaves like the like in every way that matters: optimistic, rolled back on refusal, one call per tweet at a time, and X's repeat codes counted as success in both directions (139 for a bookmark already there, 144 for one already gone). A bookmark is private, so the card only shows a `⚑` when you hold one and the counts line in the detail pane carries the number. `CreateBookmark` is stricter than the like endpoints in one way: it verifies `x-client-transaction-id` and answers a bad one with a bare 404, so a stale generator looks exactly like a dead query ID. The next section says how to tell them apart.
 
+## Tagging an account
+
+Type `@` and a letter or two in the drawer, and a list of accounts opens under the draft, inside the same box. `↑` / `↓` walk the list, `Enter` or `Tab` writes the chosen handle into the draft, and `Esc` closes the list without touching what you wrote, so a mention you decide against never costs you the draft. Each row carries the handle, the name, a `✓` for a verified account and `· following` for an account you already follow, which is what tells two near-identical handles apart before you tag the wrong one. Five rows show at a time and the walk keeps the chosen row on the screen. The list sits under the draft rather than over it, because a floating box would cover the row you are typing on.
+
+The list follows the caret, not the last key. It is worked out again from the draft and the caret on every change, so a paste, a backspace, or a walk back into a half-typed mention all open the same list, and a walk out of the mention closes it. A handle only starts a word, so `alice@example` opens nothing, and neither does a caret in the middle of a word, because a handle written there would push the rest of the word aside. The chosen handle takes the place of what you typed, and a space follows it.
+
+A query waits 180 ms after the last key before it goes out, and every answer is held for the life of the drawer, so a backspace over a handle you already typed costs no request. The read is the old REST `search/typeahead.json` with `result_type=users` and `src=compose`, the call x.com's own composer makes. It answers with the handle, the name, the verified flag and a `social_context` that carries `following` and `followed_by`; those two flags feed the same relationship map the follow badge reads, so the accounts you tag also fill in where you stand with them. A refused read says so in the list and changes nothing else, because you are still typing.
+
 ## Following an account
 
 `Shift+F` follows the author of the open tweet, and `Shift+F` again unfollows them. The author block of the open tweet carries where you stand with that account, next to the handle: `✓ following` or `not following`, and `follows you` when they do. A relationship X said nothing about draws nothing, because an absent flag is not a no.
@@ -284,6 +294,7 @@ Implemented:
 - `Shift+F` to follow or unfollow the author of the open tweet, through the old REST `friendships` endpoints, with `✓ following` / `not following` and `follows you` next to the handle
 - `Shift+P` writes a new post of your own, in the same drawer, with no tweet behind it
 - `Shift+Enter` (or `Alt+Enter`) starts a new line in the drawer, while `Enter` still sends
+- `@` and a letter open an account list under the draft, off the old REST `search/typeahead.json`, picked with `↑` / `↓` and written in by `Enter` or `Tab`
 - `y` copies the open tweet's link to the system clipboard, with a green note in the top right corner of the pane that goes on its own
 - `Shift+S` floats a stats page over the panes: posts, replies, impressions and the follower change per day over 7, 14 or 30 days, all four read from X's own analytics query, whose id lives in a chunk x.com loads only when you open that page
 - `?` floats a centred key popup over the panes, in three columns that collapse to two and then one on a narrow terminal, and scroll when the window is too short
@@ -293,7 +304,7 @@ Implemented:
 - `Enter` on a notification line that stands for a list, such as the bell line or an aggregated like, fetches that list and draws it as cards under the line
 - the unread badge from `badge_count.json` in the header, read only, so x.com stays the one thing that clears it
 - automatic retry with backoff on X's transient write refusal (error 344) and on its automation gate (error 226, up to 5 retries over 230s), for replies, likes and bookmarks
-- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, follows and the relationship badges, notifications, the tabs you add and the search behind them, the key popup and its reflow, the stats page and the analytics it reads, the cookie write path and its refusal codes, OAuth flow, media helpers
+- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, follows and the relationship badges, the mention menu and the accounts behind it, notifications, the tabs you add and the search behind them, the key popup and its reflow, the stats page and the analytics it reads, the cookie write path and its refusal codes, OAuth flow, media helpers
 
 Live X GraphQL endpoints can still break when operation IDs or response shapes change; query ID refresh and tests are set up to make those failures visible. Replies additionally depend on X's automation heuristic, which X can tighten at any time.
 

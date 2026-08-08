@@ -78,7 +78,7 @@ describe('the key list', () => {
 
   test('names every key the app answers', () => {
     const listed = new Set(helpGroups.flatMap((group) => group.entries.map((entry) => entry.keys)))
-    for (const keys of ['j / k', 'Tab', 's', 'R', 'l', 'b', 'r', 't', 'p', 'v', 'o', 'y', 'Shift+P', 'Shift+S', '?', 'q', 'Enter', 'Shift+Enter', 'Esc', 'Cmd+V']) {
+    for (const keys of ['j / k', 'Tab', 's', 'R', 'l', 'b', 'r', 't', 'p', 'v', 'o', 'y', 'Shift+P', 'Shift+S', 'Shift+F', '?', 'q', 'Enter', 'Shift+Enter', 'Esc', 'Cmd+V', '@']) {
       expect(listed).toContain(keys)
     }
   })
@@ -176,10 +176,11 @@ describe('the popup on the screen', () => {
   })
 
   // A description that wraps splits a key from what it does, which is the one thing the
-  // popup is for. The narrow layout has to keep every line whole.
+  // popup is for. The narrow layout has to keep every line whole. The window is tall enough
+  // to hold the one stack, because a shorter one scrolls and scrolling is another test.
   test('keeps every description on one line on a narrow terminal', async () => {
     for (const width of [110, 80]) {
-      const frame = await frameOf(true, width, 48)
+      const frame = await frameOf(true, width, helpContentHeight(helpStacks(width)) + 6)
       for (const group of helpGroups) {
         for (const entry of group.entries) {
           expect(frame).toContain(`${entry.keys}  `)
@@ -196,11 +197,11 @@ describe('the popup on the screen', () => {
     expect(max).toBeGreaterThan(0)
     const top = await frameOf(true, 69, 30)
     expect(top).toContain('walk the feed')
-    expect(top).not.toContain('take a character either side')
+    expect(top).not.toContain('take the character after')
     expect(top).toContain('↑ ↓ scrolls')
 
     const bottom = await frameOf(true, 69, 30, max)
-    expect(bottom).toContain('take a character either side')
+    expect(bottom).toContain('take the character after')
     expect(bottom).not.toContain('walk the feed')
     // A clipped row that escaped the card would paint past its right border.
     for (const line of bottom.split('\n')) {

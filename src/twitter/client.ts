@@ -1,4 +1,4 @@
-import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, analyticsOperation, friendshipParams, notBookmarkedCode, notificationParams, retryDelaysFor, tweetDetailQueryIdFallbacks } from './constants.ts'
+import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, analyticsOperation, friendshipParams, notBookmarkedCode, notificationParams, retryDelaysFor, tweetDetailQueryIdFallbacks, typeaheadParams } from './constants.ts'
 import { analyticsRange, analyticsVariables, parseAnalytics, type AnalyticsHistory } from './analytics.ts'
 import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildSearchFeatures, buildTweetDetailFeatures, buildUserTweetsFeatures } from './features.ts'
 import { GraphQLClient } from './graphql.ts'
@@ -7,8 +7,8 @@ import { PageContextStore } from './pageContext.ts'
 import { QueryIdStore } from './queryIds.ts'
 import { generateTransactionId } from './transactionId.ts'
 import { statusUrl } from './urls.ts'
-import type { AuthStatus, BadgeCounts, ConversationPage, DeleteResult, LikeResult, NotificationPage, PostResult, TimelinePage, TweetBundle, TwitterClientOptions, UserTimelinePage, WriteRetryNotice } from './types.ts'
-import { extractCursorFromInstructions, getHomeInstructions, getSearchInstructions, getTweetDetailInstructions, getUserTimelineInstructions, parseConversationTweets, parseHomeTweets, parseNotificationsPage, parseTimelineProfile, parseUserTweets } from './extract/index.ts'
+import type { AuthStatus, BadgeCounts, ConversationPage, DeleteResult, LikeResult, MentionUser, NotificationPage, PostResult, TimelinePage, TweetBundle, TwitterClientOptions, UserTimelinePage, WriteRetryNotice } from './types.ts'
+import { extractCursorFromInstructions, getHomeInstructions, getSearchInstructions, getTweetDetailInstructions, getUserTimelineInstructions, parseConversationTweets, parseHomeTweets, parseNotificationsPage, parseTimelineProfile, parseTypeaheadUsers, parseUserTweets } from './extract/index.ts'
 import { getInt, getMap, getSlice, getStr, isRecord } from '../utils/guards.ts'
 import type { Fetcher } from '../utils/fetcher.ts'
 import { defaultFetcher } from '../utils/fetcher.ts'
@@ -232,10 +232,24 @@ export class TwitterClient {
     return { notifications: getInt(body, 'ntab_unread_count'), messages: getInt(body, 'dm_unread_count') }
   }
 
-  private async restGet(path: string): Promise<unknown> {
+  // The accounts the composer offers for an @. It is the read behind x.com's own @ menu, and
+  // it is the old REST API, so it answers with a flat list rather than with a timeline. The
+  // reader types while it runs, so a failed read gives back nothing instead of throwing: an
+  // empty list closes the menu, which is what a query with no accounts behind it does anyway.
+  async searchUsers(args: { query: string; count: number }): Promise<MentionUser[]> {
+    const params = new URLSearchParams({ ...typeaheadParams, q: args.query, count: String(args.count) })
+    try {
+      return parseTypeaheadUsers(await this.restGet(`/i/api/1.1/search/typeahead.json?${params.toString()}`, 'https://x.com/home'))
+    } catch (error) {
+      await this.debugLogger?.log('twitter.searchUsers.failed', { query: args.query, error: errorMessage(error) })
+      return []
+    }
+  }
+
+  private async restGet(path: string, referer = 'https://x.com/notifications'): Promise<unknown> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: 'GET',
-      headers: this.headers.jsonHeaders({ referer: 'https://x.com/notifications' })
+      headers: this.headers.jsonHeaders({ referer })
     })
     const text = await response.text()
     if (!response.ok) {

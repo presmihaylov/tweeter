@@ -24,6 +24,9 @@ export type ArticleBody = { title: string; blocks?: ArticleBlock[] }
 // Absent means X did not say, which is not the same as a false.
 export type UserRelation = { following?: boolean; followedBy?: boolean }
 
+// An account the composer can tag, as the typeahead read answers for it.
+export type MentionUser = { id: string; handle: string; name: string; verified?: boolean } & UserRelation
+
 export type AppTweet = {
   id: string
   text: string
