@@ -1,4 +1,4 @@
-import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, analyticsOperation, friendshipParams, notBookmarkedCode, notificationParams, retryDelaysFor, tweetDetailQueryIdFallbacks, typeaheadParams } from './constants.ts'
+import { alreadyFavoritedCode, defaultBaseUrl, defaultGraphQLBase, defaultUserAgent, analyticsOperation, friendshipParams, mediaUploadUrl, notBookmarkedCode, notificationParams, retryDelaysFor, tweetDetailQueryIdFallbacks, typeaheadParams, uploadChunkBytes, uploadPollAttempts } from './constants.ts'
 import { analyticsRange, analyticsVariables, parseAnalytics, type AnalyticsHistory } from './analytics.ts'
 import { buildArticleFieldToggles, buildCreateTweetFeatures, buildHomeTimelineFeatures, buildSearchFeatures, buildTweetDetailFeatures, buildUserTweetsFeatures } from './features.ts'
 import { GraphQLClient } from './graphql.ts'
@@ -7,7 +7,7 @@ import { PageContextStore } from './pageContext.ts'
 import { QueryIdStore } from './queryIds.ts'
 import { generateTransactionId } from './transactionId.ts'
 import { statusUrl } from './urls.ts'
-import type { AuthStatus, BadgeCounts, ConversationPage, DeleteResult, LikeResult, MentionUser, NotificationPage, PostResult, TimelinePage, TweetBundle, TwitterClientOptions, UserTimelinePage, WriteRetryNotice } from './types.ts'
+import type { AuthStatus, BadgeCounts, ConversationPage, DeleteResult, LikeResult, MediaResult, MentionUser, NotificationPage, PostResult, TimelinePage, TweetBundle, TwitterClientOptions, UserTimelinePage, WriteRetryNotice } from './types.ts'
 import { extractCursorFromInstructions, getHomeInstructions, getSearchInstructions, getTweetDetailInstructions, getUserTimelineInstructions, parseConversationTweets, parseHomeTweets, parseNotificationsPage, parseTimelineProfile, parseTypeaheadUsers, parseUserTweets } from './extract/index.ts'
 import { getInt, getMap, getSlice, getStr, isRecord } from '../utils/guards.ts'
 import type { Fetcher } from '../utils/fetcher.ts'
@@ -18,6 +18,7 @@ import { safeJsonSnippet } from '../utils/debugLog.ts'
 
 export class TwitterClient {
   private readonly baseUrl: string
+  private readonly uploadUrl: string
   private readonly headers: HeaderBuilder
   private readonly gql: GraphQLClient
   private readonly queryIds: QueryIdStore
@@ -29,6 +30,7 @@ export class TwitterClient {
 
   constructor(opts: TwitterClientOptions) {
     this.baseUrl = opts.baseUrl ?? defaultBaseUrl
+    this.uploadUrl = opts.uploadUrl ?? mediaUploadUrl
     this.fetchImpl = opts.fetch ?? defaultFetcher
     this.debugLogger = opts.debugLogger
     this.sleep = opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
@@ -332,32 +334,112 @@ export class TwitterClient {
     }
   }
 
+  // A picture does not travel with the tweet. It goes to X's own upload host first, in three
+  // steps, and CreateTweet then names the id that came back. The id lives a day, so the
+  // upload happens when the reader sends rather than when they paste.
+  async uploadImage(args: { data: Uint8Array; mime: string }): Promise<MediaResult> {
+    try {
+      const started = await this.uploadCommand({
+        command: 'INIT',
+        total_bytes: String(args.data.length),
+        media_type: args.mime,
+        media_category: args.mime === 'image/gif' ? 'tweet_gif' : 'tweet_image'
+      })
+      const mediaId = getStr(started.body, 'media_id_string')
+      if (mediaId === '') {
+        return this.uploadRefused('INIT', started)
+      }
+      for (let index = 0; index * uploadChunkBytes < args.data.length; index += 1) {
+        const chunk = args.data.slice(index * uploadChunkBytes, (index + 1) * uploadChunkBytes)
+        const form = new FormData()
+        form.append('media', new Blob([chunk]), 'blob')
+        const appended = await this.uploadCommand({ command: 'APPEND', media_id: mediaId, segment_index: String(index) }, form)
+        if (appended.status >= 400) {
+          return this.uploadRefused('APPEND', appended)
+        }
+      }
+      const finalized = await this.uploadCommand({ command: 'FINALIZE', media_id: mediaId })
+      if (finalized.status >= 400) {
+        return this.uploadRefused('FINALIZE', finalized)
+      }
+      return this.awaitProcessing(mediaId, finalized.body)
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) }
+    }
+  }
+
+  // A picture is ready the moment FINALIZE answers. An animation is not: X transcodes it and
+  // says how long to wait, so the id is only good once the state reads succeeded.
+  private async awaitProcessing(mediaId: string, finalized: unknown): Promise<MediaResult> {
+    let info = getMap(finalized, 'processing_info')
+    for (let attempt = 0; info !== undefined && attempt < uploadPollAttempts; attempt += 1) {
+      const state = getStr(info, 'state')
+      if (state === 'succeeded' || state === '') {
+        return { ok: true, mediaId }
+      }
+      if (state === 'failed') {
+        return { ok: false, error: getStr(getMap(info, 'error'), 'message') || 'X could not take the image' }
+      }
+      await this.sleep(Math.max(1, getInt(info, 'check_after_secs')) * 1_000)
+      info = getMap((await this.uploadCommand({ command: 'STATUS', media_id: mediaId })).body, 'processing_info')
+    }
+    if (info === undefined) {
+      return { ok: true, mediaId }
+    }
+    return { ok: false, error: 'X is still processing the image; try again in a moment' }
+  }
+
+  // APPEND answers 204 with an empty body, so an empty answer is not an error here. The
+  // multipart boundary comes from the FormData, so these headers carry no content type.
+  private async uploadCommand(params: Record<string, string>, form?: FormData): Promise<{ body: unknown; status: number }> {
+    const headers = this.headers.baseHeaders({ referer: 'https://x.com/home' })
+    const response = await this.fetchImpl(`${this.uploadUrl}?${new URLSearchParams(params).toString()}`, form
+      ? { method: 'POST', headers, body: form }
+      : { method: 'POST', headers })
+    const text = await response.text()
+    if (text.trim() === '') {
+      return { body: {}, status: response.status }
+    }
+    try {
+      return { body: JSON.parse(text) as unknown, status: response.status }
+    } catch {
+      throw new Error(`the upload host answered ${response.status} with something that is not JSON`)
+    }
+  }
+
+  private async uploadRefused(step: string, answer: { body: unknown; status: number }): Promise<MediaResult> {
+    const failure = graphQLError(answer.body, answer.status)
+    await this.debugLogger?.log('twitter.uploadImage.refused', { step, status: answer.status, body: safeJsonSnippet(answer.body) })
+    return { ok: false, error: failure.error, status: answer.status }
+  }
+
   // The web app posts a reply with the same cookies it reads with, so the TUI does too.
   // The reply block is what makes CreateTweet answer a tweet instead of starting one.
-  async replyToTweet(args: { tweetId: string; text: string; onRetry?: (notice: WriteRetryNotice) => void }): Promise<PostResult> {
+  async replyToTweet(args: { tweetId: string; text: string; mediaIds?: string[]; onRetry?: (notice: WriteRetryNotice) => void }): Promise<PostResult> {
     return this.createTweet({
       reply: { in_reply_to_tweet_id: args.tweetId, exclude_reply_user_ids: [] }
-    }, args.text, args.onRetry)
+    }, args.text, args.mediaIds, args.onRetry)
   }
 
   // A repost with your own words is one CreateTweet that carries the quoted tweet as a link,
   // which is what x.com sends. It starts a tweet rather than answering one, so it takes no
   // reply block. X does not count the link against the 280 characters.
-  async quoteTweet(args: { tweetId: string; handle: string; text: string; onRetry?: (notice: WriteRetryNotice) => void }): Promise<PostResult> {
-    return this.createTweet({ attachment_url: statusUrl(args.handle, args.tweetId) }, args.text, args.onRetry)
+  async quoteTweet(args: { tweetId: string; handle: string; text: string; mediaIds?: string[]; onRetry?: (notice: WriteRetryNotice) => void }): Promise<PostResult> {
+    return this.createTweet({ attachment_url: statusUrl(args.handle, args.tweetId) }, args.text, args.mediaIds, args.onRetry)
   }
 
   // A new post is the same CreateTweet with nothing added: no reply block and no attachment.
-  async postTweet(args: { text: string; onRetry?: (notice: WriteRetryNotice) => void }): Promise<PostResult> {
-    return this.createTweet({}, args.text, args.onRetry)
+  async postTweet(args: { text: string; mediaIds?: string[]; onRetry?: (notice: WriteRetryNotice) => void }): Promise<PostResult> {
+    return this.createTweet({}, args.text, args.mediaIds, args.onRetry)
   }
 
-  private async createTweet(extra: Record<string, unknown>, text: string, onRetry?: (notice: WriteRetryNotice) => void): Promise<PostResult> {
+  private async createTweet(extra: Record<string, unknown>, text: string, mediaIds?: string[], onRetry?: (notice: WriteRetryNotice) => void): Promise<PostResult> {
     const variables: Record<string, unknown> = {
       tweet_text: text,
       ...extra,
       dark_request: false,
-      media: { media_entities: [], possibly_sensitive: false },
+      // The order of the ids is the order the pictures take on the tweet.
+      media: { media_entities: (mediaIds ?? []).map((id) => ({ media_id: id, tagged_users: [] })), possibly_sensitive: false },
       semantic_annotation_ids: []
     }
     return this.withWriteRetry('CreateTweet', onRetry, async () => {

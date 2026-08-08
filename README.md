@@ -92,6 +92,8 @@ The drawer is a text field. `←` / `→` move the caret, `Alt+←` / `Alt+→` 
 
 `@` and a letter or two open a list of accounts under the draft. `↑` / `↓` walk it, `Enter` or `Tab` writes the chosen handle in, and `Esc` closes the list and leaves the draft alone.
 
+`Ctrl+V` pastes a picture. A terminal cannot hand over pixels, so a `Cmd+V` on a clipboard that holds only an image sends nothing at all; `Ctrl+V` tells tweeter to go and read the clipboard itself. The picture takes a `[Image 1]` place in the draft, which you can move, walk over and delete like any other text, and it goes up as real media when you send. Four pictures fit on a tweet.
+
 `y` copies the open tweet's link, `https://x.com/handle/status/id`, to your system clipboard, ready to paste anywhere you share it. A copy leaves nothing on the screen to show for itself, so a green note comes up in the top right corner of the pane, `⧉ link copied`, and goes on its own after about two seconds; the status line keeps the whole link until the next key. A second copy restarts that clock rather than letting the note leave while you are still reading it. When the clipboard command is missing, the note says `⧉ copy failed` and the status line names the reason.
 
 `Shift+P` writes a new post of your own. It opens the same drawer as `r` and `t`, with the heading `New post` and no tweet behind it, so it works on an empty feed and leaves the feed selection where it was. `Enter` sends it as a plain tweet: one `CreateTweet` with no reply block and no attached link. The same 280-character counter, the same retry on X's transient refusals, and the same `Esc` apply.
@@ -214,6 +216,16 @@ The list follows the caret, not the last key. It is worked out again from the dr
 
 A query waits 180 ms after the last key before it goes out, and every answer is held for the life of the drawer, so a backspace over a handle you already typed costs no request. The read is the old REST `search/typeahead.json` with `result_type=users` and `src=compose`, the call x.com's own composer makes. It answers with the handle, the name, the verified flag and a `social_context` that carries `following` and `followed_by`; those two flags feed the same relationship map the follow badge reads, so the accounts you tag also fill in where you stand with them. A refused read says so in the list and changes nothing else, because you are still typing.
 
+## Pasting a picture
+
+Press `Ctrl+V` in the drawer and the picture on your clipboard joins the draft. It shows as a `[Image 1]` token where the caret was, and a green line under the draft lists what is attached: the token, where it came from and how much it weighs. The token is ordinary text. Walk over it, move it, or delete it, and the picture follows: a draft with no `[Image 1]` in it sends no first picture, and a token you move ahead of another moves its picture with it, because the order of the tokens is the order the pictures take on the tweet. The token never reaches X. It comes out of the text at send time, so it costs none of the 280 characters and nobody sees it on the tweet.
+
+`Ctrl+V` is the key, not `Cmd+V`, and the reason is the terminal. A terminal forwards the clipboard as text or not at all; a clipboard that holds only an image produces no event, so tweeter never learns that you pressed anything. `Ctrl+V` is a keystroke like any other, and it tells tweeter to read the clipboard itself. On macOS that read goes through AppKit: a screenshot is already PNG and is taken as it stands, a picture copied out of another app is often TIFF and is re-encoded, and a file copied in Finder arrives as a path, so a JPEG stays a JPEG. On Linux it is `wl-paste`, then `xclip`. A clipboard with no picture on it says so in the status line and changes nothing.
+
+The bytes wait in the drawer until you send, so a draft you throw away costs X nothing. `Enter` then puts each picture up first, in the order the tokens stand in the draft, and the status line counts them (`uploading image 2 of 3`). The upload is X's own three-step call on `upload.x.com`: `INIT` names the size and the type and answers with a media id, `APPEND` carries the bytes, and `FINALIZE` closes it. An animated GIF is transcoded after `FINALIZE`, so tweeter waits the number of seconds X asks for and checks again. `CreateTweet` then names the ids it collected. A refused upload keeps the drawer open with every word and every token still in it, so nothing is lost and `Enter` tries again.
+
+X sets the limits, and tweeter refuses a paste that breaks one rather than spend the upload to be told: four pictures to a tweet, 5 MB for a picture and 15 MB for a GIF. A picture is a tweet on its own, so a draft that carries one may have no words in it. The search prompt shares the drawer and takes no picture.
+
 ## Following an account
 
 `Shift+F` follows the author of the open tweet, and `Shift+F` again unfollows them. The author block of the open tweet carries where you stand with that account, next to the handle: `✓ following` or `not following`, and `follows you` when they do. A relationship X said nothing about draws nothing, because an absent flag is not a no.
@@ -295,6 +307,7 @@ Implemented:
 - `Shift+P` writes a new post of your own, in the same drawer, with no tweet behind it
 - `Shift+Enter` (or `Alt+Enter`) starts a new line in the drawer, while `Enter` still sends
 - `@` and a letter open an account list under the draft, off the old REST `search/typeahead.json`, picked with `↑` / `↓` and written in by `Enter` or `Tab`
+- `Ctrl+V` pastes the clipboard picture into the drawer as an `[Image 1]` token, up to four, and sends it as real media through the chunked `upload.x.com` call
 - `y` copies the open tweet's link to the system clipboard, with a green note in the top right corner of the pane that goes on its own
 - `Shift+S` floats a stats page over the panes: posts, replies, impressions and the follower change per day over 7, 14 or 30 days, all four read from X's own analytics query, whose id lives in a chunk x.com loads only when you open that page
 - `?` floats a centred key popup over the panes, in three columns that collapse to two and then one on a narrow terminal, and scroll when the window is too short
@@ -304,7 +317,7 @@ Implemented:
 - `Enter` on a notification line that stands for a list, such as the bell line or an aggregated like, fetches that list and draws it as cards under the line
 - the unread badge from `badge_count.json` in the header, read only, so x.com stays the one thing that clears it
 - automatic retry with backoff on X's transient write refusal (error 344) and on its automation gate (error 226, up to 5 retries over 230s), for replies, likes and bookmarks
-- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, follows and the relationship badges, the mention menu and the accounts behind it, notifications, the tabs you add and the search behind them, the key popup and its reflow, the stats page and the analytics it reads, the cookie write path and its refusal codes, OAuth flow, media helpers
+- mocked tests for config import, auth headers, extraction, timelines, refresh direction, replies, likes, bookmarks, follows and the relationship badges, the mention menu and the accounts behind it, the pasted pictures and the media upload under them, notifications, the tabs you add and the search behind them, the key popup and its reflow, the stats page and the analytics it reads, the cookie write path and its refusal codes, OAuth flow, media helpers
 
 Live X GraphQL endpoints can still break when operation IDs or response shapes change; query ID refresh and tests are set up to make those failures visible. Replies additionally depend on X's automation heuristic, which X can tighten at any time.
 

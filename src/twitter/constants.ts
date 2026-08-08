@@ -29,6 +29,22 @@ export const lazyChunkOperations: Readonly<Record<string, string>> = {
 
 export const tweetTextLimit = 280
 
+// A picture does not go with the tweet: it goes up first, on its own host, and the tweet
+// then names the id that came back. The upload is in three steps, INIT, APPEND and FINALIZE,
+// because the same endpoint also takes video.
+export const mediaUploadUrl = 'https://upload.x.com/i/media/upload.json'
+
+// X takes four pictures on a tweet, 5 MB each, and 15 MB for an animation. The chunk size is
+// what x.com itself sends, so a picture under it goes up in one APPEND.
+export const imageAttachCap = 4
+export const imageBytesLimit = 5 * 1024 * 1024
+export const gifBytesLimit = 15 * 1024 * 1024
+export const uploadChunkBytes = 4 * 1024 * 1024
+
+// An animation is not ready when FINALIZE answers: X transcodes it and says how long to wait.
+// The poll gives up rather than hold the drawer open for a file that never finishes.
+export const uploadPollAttempts = 10
+
 // The notifications tab is the old REST API, and it answers a bare request with a thinner
 // page: no extended text, no media sizes, no reply counts. These are the toggles x.com itself
 // sends, minus the ones for parts this app does not draw.

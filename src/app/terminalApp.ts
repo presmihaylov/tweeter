@@ -1,15 +1,15 @@
 import { CliRenderEvents, createCliRenderer, decodePasteBytes } from '@opentui/core'
-import type { AppMedia, AppProfile, AppTweet, AuthStatus, MentionUser, NotificationRow, PostResult, TimelinePage, WriteRetryNotice } from '../twitter/types.ts'
+import type { AppMedia, AppProfile, AppTweet, AuthStatus, MediaResult, MentionUser, NotificationRow, PostResult, TimelinePage, WriteRetryNotice } from '../twitter/types.ts'
 import { TwitterClient, userIdFromCookies } from '../twitter/client.ts'
-import { tweetTextLimit } from '../twitter/constants.ts'
+import { gifBytesLimit, imageAttachCap, imageBytesLimit, tweetTextLimit } from '../twitter/constants.ts'
 import type { TweeterConfig, TweeterProfile } from '../config/schema.ts'
 import { ConfigStore } from '../config/store.ts'
-import { addSearchTab, applyBookmark, applyFollow, applyLike, beginConversationLoad, beginStatsLoad, chooseMention, clearDetailSelection, closeComposer, closeHelp, closeMentions, closeReplies, closeStats, clearToast, collapseNotice, deleteFromDraft, emptyTimeline, enterSelection, expandNotice, failConversationLoad, failStatsLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, isSearchTab, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeMentionUsers, mergeNotificationsPage, mergeStats, mergeTimelinePage, moveComposerCaret, moveMention, needsMentions, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, relationOf, removeSearchTab, repliesOpen, searchQueryOf, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, scrollStats, selectRelativeTweet, setFeedSort, showToast, tabOrder, toggleHelp, toggleLightbox, toggleReplies, toggleStats, turnStatsWindow, videoOf, type AppState, type TabId, type TimelineId, type TimelineState, type WriteMode } from '../state/store.ts'
+import { addSearchTab, applyBookmark, applyFollow, applyLike, attachImage, beginConversationLoad, beginStatsLoad, chooseMention, clearDetailSelection, closeComposer, closeHelp, closeMentions, closeReplies, closeStats, clearToast, collapseNotice, deleteFromDraft, draftImages, emptyTimeline, enterSelection, expandNotice, failConversationLoad, failStatsLoad, focusDetailText, focusedTweet, initialAppState, insertIntoDraft, isSearchTab, leaveSelection, mergeConversationPage, mergeFocalTweet, mergeMentionUsers, mergeNotificationsPage, mergeStats, mergeTimelinePage, moveComposerCaret, moveMention, needsMentions, needsOlderNotifications, needsOlderTweets, needsReplies, noticeExpanded, openComposer, previewOf, previewsOf, relationOf, removeSearchTab, repliesOpen, searchQueryOf, selectFirstReply, selectRelativeDetail, selectRelativeRow, selectedRow, scrollHelp, scrollStats, selectRelativeTweet, setFeedSort, showToast, tabOrder, toggleHelp, toggleLightbox, toggleReplies, toggleStats, turnStatsWindow, videoOf, type AppState, type ComposerMode, type DraftImage, type TabId, type TimelineId, type TimelineState, type WriteMode } from '../state/store.ts'
 import { createMainScreen, helpScrollMax, retryStatus, writeFailure } from './mainScreen.ts'
 import { errorMessage } from '../utils/result.ts'
 import { createDebugLogger } from '../utils/debugLog.ts'
 import { createOnboardingScreen } from './onboardingScreen.ts'
-import { caretMoveFor, cleanPasted, helpScrollStep, isCtrlEnterKey, isEnterKey, isFollowKey, isHelpKey, isNewlineKey, isStatsKey, isTextInput, pastedText } from './keyEvents.ts'
+import { caretMoveFor, cleanPasted, helpScrollStep, isCtrlEnterKey, isEnterKey, isFollowKey, isHelpKey, isImagePasteKey, isNewlineKey, isStatsKey, isTextInput, pastedText } from './keyEvents.ts'
 import { buildStatsRows, statsTotals, type StatsWindow } from '../stats/aggregate.ts'
 import type { AnalyticsHistory } from '../twitter/analytics.ts'
 import { createImageLayer, writeToTerminal, type ImagePlacement } from '../media/imageLayer.ts'
@@ -17,6 +17,8 @@ import { cellSize } from '../media/geometry.ts'
 import { detectImageRenderer } from '../media/detect.ts'
 import { kittyDeleteAll } from '../media/kitty.ts'
 import { copyToClipboard, openExternal, tweetUrl } from '../media/openExternal.ts'
+import { readClipboardImage } from '../media/clipboardImage.ts'
+import { draftText } from '../state/attachments.ts'
 
 // Which end of the feed a fetch asks for. X gives a page two cursors that point opposite
 // ways, so the mode picks the cursor and the mode picks where the page lands.
@@ -81,24 +83,44 @@ export const composerWhat = (mode: WriteMode): string => {
   return mode === 'quote' ? 'quote' : 'reply'
 }
 
-// Only the three calls the drawer needs, so a test can stand in for the client.
+// Only the calls the drawer needs, so a test can stand in for the client.
 export type DraftSender = {
-  replyToTweet: (args: { tweetId: string; text: string; onRetry?: (notice: WriteRetryNotice) => void }) => Promise<PostResult>
-  quoteTweet: (args: { tweetId: string; handle: string; text: string; onRetry?: (notice: WriteRetryNotice) => void }) => Promise<PostResult>
-  postTweet: (args: { text: string; onRetry?: (notice: WriteRetryNotice) => void }) => Promise<PostResult>
+  replyToTweet: (args: { tweetId: string; text: string; mediaIds?: string[]; onRetry?: (notice: WriteRetryNotice) => void }) => Promise<PostResult>
+  quoteTweet: (args: { tweetId: string; handle: string; text: string; mediaIds?: string[]; onRetry?: (notice: WriteRetryNotice) => void }) => Promise<PostResult>
+  postTweet: (args: { text: string; mediaIds?: string[]; onRetry?: (notice: WriteRetryNotice) => void }) => Promise<PostResult>
+  uploadImage: (args: { data: Uint8Array; mime: string }) => Promise<MediaResult>
 }
 
 // The mode picks the call. A new post carries no tweet, and the drawer refuses to send a
 // reply or a quote whose tweet it lost, so a missing target here can only be a new post.
-export const sendDraft = (args: { client: DraftSender; mode: WriteMode; target?: AppTweet; text: string; onRetry: (notice: WriteRetryNotice) => void }): Promise<PostResult> => {
-  const { client, mode, target, text, onRetry } = args
+export const sendDraft = (args: { client: DraftSender; mode: WriteMode; target?: AppTweet; text: string; mediaIds: string[]; onRetry: (notice: WriteRetryNotice) => void }): Promise<PostResult> => {
+  const { client, mode, target, text, mediaIds, onRetry } = args
   if (mode === 'post' || target === undefined) {
-    return client.postTweet({ text, onRetry })
+    return client.postTweet({ text, mediaIds, onRetry })
   }
   if (mode === 'quote') {
-    return client.quoteTweet({ tweetId: target.id, handle: target.author.handle, text, onRetry })
+    return client.quoteTweet({ tweetId: target.id, handle: target.author.handle, text, mediaIds, onRetry })
   }
-  return client.replyToTweet({ tweetId: target.id, text, onRetry })
+  return client.replyToTweet({ tweetId: target.id, text, mediaIds, onRetry })
+}
+
+// What a pasted picture may weigh, by what it is. X takes a bigger animation than a picture.
+export const imageLimitFor = (mime: string): number => (mime === 'image/gif' ? gifBytesLimit : imageBytesLimit)
+
+// Why the drawer will not take this picture, if it will not. The count and the weight are
+// both X's rules, and both are cheaper to answer here than after the upload.
+export const imageRefusal = (args: { mode: ComposerMode; attached: number; bytes: number; mime: string }): string | undefined => {
+  if (args.mode === 'search') {
+    return 'a search takes no image'
+  }
+  if (args.attached >= imageAttachCap) {
+    return `a tweet takes ${imageAttachCap} images`
+  }
+  const limit = imageLimitFor(args.mime)
+  if (args.bytes > limit) {
+    return `the image is ${Math.round(args.bytes / 1024)} KB; the limit is ${Math.round(limit / 1024)} KB`
+  }
+  return undefined
 }
 
 // Tab walks the tabs in the order the rail lists them, and wraps at the end.
@@ -675,20 +697,41 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       rerender()
     }
 
+    // The pictures go up one at a time, in the order their tokens stand in the draft, because
+    // that order is the order they take on the tweet. A failure leaves the draft alone.
+    const uploadDraftImages = async (images: DraftImage[]): Promise<{ ok: true; mediaIds: string[] } | { ok: false; error: string }> => {
+      const mediaIds: string[] = []
+      for (const [index, image] of images.entries()) {
+        state = { ...state, status: `uploading image ${index + 1} of ${images.length}` }
+        rerender()
+        const result = await client.uploadImage({ data: image.data, mime: image.mime })
+        if (!result.ok) {
+          await debugLogger.log('ui.composer.uploadFailed', { token: image.token, bytes: image.data.length, error: result.error, status: result.status })
+          return { ok: false, error: `${image.token} did not go up: ${result.error}` }
+        }
+        mediaIds.push(result.mediaId)
+      }
+      return { ok: true, mediaIds }
+    }
+
     const sendComposer = async (): Promise<void> => {
       const targetId = state.composer.targetTweetId
       const target = targetId ? state.tweets[targetId] : undefined
       const mode = state.composer.mode
-      const text = state.composer.draft.trim()
       // The search prompt shares the drawer, so Enter there makes a tab instead of a write.
       // Splitting it off here is what keeps the write path unable to post a query.
       if (mode === 'search') {
-        openSearchTab(text)
+        openSearchTab(state.composer.draft.trim())
         return
       }
+      // The [Image n] tokens stand for the pictures on the screen, so they come out of the
+      // words X is sent. The pictures ride beside the tweet instead.
+      const text = draftText(state.composer.draft)
+      const images = draftImages(state)
       const what = composerWhat(mode)
-      // A new post answers no tweet, so it is the one mode that needs no target.
-      if ((!target && mode !== 'post') || text === '') {
+      // A new post answers no tweet, so it is the one mode that needs no target. A picture
+      // is a tweet on its own, so a draft that carries one needs no words.
+      if ((!target && mode !== 'post') || (text === '' && images.length === 0)) {
         return
       }
       // X counts the characters itself, but a local check saves a round trip and keeps
@@ -701,12 +744,20 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
       state = { ...state, composer: { ...state.composer, sending: true, error: undefined }, status: `sending ${what}` }
       rerender()
-      await debugLogger.log('ui.composer.submit', { mode, targetTweetId: target?.id, textLength: text.length })
+      await debugLogger.log('ui.composer.submit', { mode, targetTweetId: target?.id, textLength: text.length, images: images.length })
+      // The pictures go up before the tweet does. A refused upload keeps the drawer open with
+      // every word and every token still in it, so the reader can send again.
+      const uploaded = await uploadDraftImages(images)
+      if (!uploaded.ok) {
+        state = { ...state, composer: { ...state.composer, sending: false, error: uploaded.error }, status: uploaded.error }
+        rerender()
+        return
+      }
       const onRetry = (notice: WriteRetryNotice): void => {
         state = { ...state, status: retryStatus(what, notice) }
         rerender()
       }
-      const result: PostResult = await sendDraft({ client, mode, target, text, onRetry })
+      const result: PostResult = await sendDraft({ client, mode, target, text, mediaIds: uploaded.mediaIds, onRetry })
       if (result.ok) {
         state = { ...closeComposer(state, `sent ${what} ${result.tweetId}`) }
         rerender()
@@ -715,6 +766,31 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       await debugLogger.log('ui.composer.failed', { mode, targetTweetId: target?.id, error: result.error, status: result.status, code: result.code, logPath: debugLogger.path })
       const failure = writeFailure(what, result, debugLogger.path)
       state = { ...state, composer: { ...state.composer, sending: false, error: failure.error }, status: failure.status }
+      rerender()
+    }
+
+    // A terminal sends no event at all for a clipboard that holds only a picture, so Cmd+V
+    // cannot carry one. Ctrl+V reads the clipboard itself instead, and the picture takes a
+    // [Image n] place in the draft until the reader sends it.
+    const pasteImage = async (): Promise<void> => {
+      const found = await readClipboardImage()
+      if (!found) {
+        state = { ...state, status: 'the clipboard holds no image' }
+        rerender()
+        return
+      }
+      const refusal = imageRefusal({
+        mode: state.composer.mode,
+        attached: draftImages(state).length,
+        bytes: found.data.length,
+        mime: found.mime
+      })
+      if (refusal) {
+        state = { ...state, status: refusal }
+        rerender()
+        return
+      }
+      state = attachImage(state, { name: found.name, mime: found.mime, data: found.data })
       rerender()
     }
 
@@ -805,6 +881,10 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       }
       // The drawer is a text field while it is open, so it answers every key itself.
       if (state.composer.open) {
+        if (isImagePasteKey(key)) {
+          void pasteImage()
+          return
+        }
         if (isNewlineKey(key)) {
           state = insertIntoDraft(state, '\n')
           rerender()

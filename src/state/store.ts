@@ -2,6 +2,7 @@ import type { AppMedia, AppProfile, AppTweet, AppVideo, MentionUser, Notificatio
 import type { StatsRow, StatsTotals, StatsWindow } from '../stats/aggregate.ts'
 import { nextStatsWindow } from '../stats/aggregate.ts'
 import { applyMention, mentionQuery } from './mentions.ts'
+import { imageToken, nextImageNumber } from './attachments.ts'
 
 export type FeedId = 'following' | 'forYou'
 
@@ -88,6 +89,12 @@ export type CaretMove = 'left' | 'right' | 'start' | 'end' | 'wordLeft' | 'wordR
 // the reader keeps typing while the read runs, and an answer to an older query is stale.
 export type MentionsState = { query: string; users: MentionUser[]; index: number; loading: boolean }
 
+// A picture the reader pasted, held until the draft is sent. The token is the [Image 1] that
+// stands for it in the draft, which is what ties the two together: delete the token and the
+// picture goes with it. The bytes wait here rather than go up at once, because a draft the
+// reader throws away should cost X nothing.
+export type DraftImage = { token: string; name: string; mime: string; data: Uint8Array }
+
 export type AppState = {
   tweets: Record<string, AppTweet>
   // What stands between you and each account you have seen, keyed by user id. It sits here
@@ -105,7 +112,17 @@ export type AppState = {
   // The notifications tab walks rows, not tweets, so it keeps its own cursor. A row names
   // the tweet it is about, and focusedTweetId reads it from here while that tab is up.
   selectedRowKey?: string
-  composer: { open: boolean; mode: ComposerMode; targetTweetId?: string; draft: string; caret: number; error?: string; sending: boolean }
+  composer: {
+    open: boolean
+    mode: ComposerMode
+    targetTweetId?: string
+    draft: string
+    caret: number
+    error?: string
+    sending: boolean
+    // The pasted pictures, one for each [Image n] the draft holds.
+    images?: DraftImage[]
+  }
   // The @ menu over the drawer. It is absent unless the caret sits in a mention, so the one
   // field says both whether the menu is up and what it is offering.
   mentions?: MentionsState
@@ -663,6 +680,30 @@ export const chooseMention = (state: AppState): AppState => {
 export const insertIntoDraft = (state: AppState, text: string): AppState => {
   const { draft, caret } = state.composer
   return withDraft(state, `${draft.slice(0, caret)}${text}${draft.slice(caret)}`, caret + text.length)
+}
+
+// A pasted picture writes its token at the caret. The leading space keeps the token off the
+// end of the word before it, so deleting the word does not eat half the token.
+export const attachImage = (state: AppState, image: { name: string; mime: string; data: Uint8Array }): AppState => {
+  const { draft, caret } = state.composer
+  const token = imageToken(nextImageNumber(draft))
+  const lead = caret > 0 && !/\s/.test(draft[caret - 1] ?? ' ') ? ' ' : ''
+  const written = `${lead}${token} `
+  const next = withDraft(state, `${draft.slice(0, caret)}${written}${draft.slice(caret)}`, caret + written.length)
+  return {
+    ...next,
+    composer: { ...next.composer, images: [...(state.composer.images ?? []), { token, ...image }] },
+    status: `pasted ${token}`
+  }
+}
+
+// The pictures the draft still names, in the order their tokens stand in it. A token the
+// reader deleted takes its picture out of the tweet, and moving a token moves the picture.
+export const draftImages = (state: AppState): DraftImage[] => {
+  const { draft, images } = state.composer
+  return (images ?? [])
+    .filter((image) => draft.includes(image.token))
+    .sort((first, second) => draft.indexOf(first.token) - draft.indexOf(second.token))
 }
 
 // -1 is Backspace and takes the character behind the caret; 1 is Delete and takes the one

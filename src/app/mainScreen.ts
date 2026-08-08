@@ -1,5 +1,6 @@
 import { BoxRenderable, CliRenderEvents, TextRenderable, type CliRenderer, type Renderable } from '@opentui/core'
-import { activeTimeline, focusedTweet, parentIdOf, previewOf, previewsOf, relationOf, repliesOpen, replyIdsOf, searchQueryOf, tabOrder, type AppState, type ComposerMode, type ConversationState, type FeedSort, type MentionsState, type NotificationsState, type TabId, type TimelineId } from '../state/store.ts'
+import { activeTimeline, draftImages, focusedTweet, parentIdOf, previewOf, previewsOf, relationOf, repliesOpen, replyIdsOf, searchQueryOf, tabOrder, type AppState, type ComposerMode, type ConversationState, type DraftImage, type FeedSort, type MentionsState, type NotificationsState, type TabId, type TimelineId } from '../state/store.ts'
+import { draftText } from '../state/attachments.ts'
 import type { AppMedia, AppNotice, AppTweet, AuthStatus, MentionUser, NoticeIcon, NotificationRow, UserRelation, WriteRetryNotice } from '../twitter/types.ts'
 import { automationWriteCode, tweetTextLimit } from '../twitter/constants.ts'
 import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
@@ -384,6 +385,7 @@ export const helpGroups: readonly HelpGroup[] = [
       { keys: 'Shift+Enter', what: 'start a new line' },
       { keys: 'Esc', what: 'close and keep the draft' },
       { keys: 'Cmd+V', what: 'paste the clipboard' },
+      { keys: 'Ctrl+V', what: 'paste an image' },
       { keys: '@', what: 'tag an account' },
       { keys: '← / →', what: 'move the caret' },
       { keys: 'Alt+← / Alt+→', what: 'jump a word' },
@@ -966,6 +968,14 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     flexGrow: 1,
     wrapMode: 'word'
   })
+  const composerImages = new TextRenderable(renderer, {
+    id: 'composer-images',
+    content: '',
+    fg: '#3fb950',
+    width: '100%',
+    height: 0,
+    visible: false
+  })
   // The @ menu sits under the draft rather than over it, because a box over the drawer would
   // cover the row the reader is typing on.
   const composerMenu = new TextRenderable(renderer, {
@@ -978,6 +988,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   })
   composer.add(composerTitle)
   composer.add(composerText)
+  composer.add(composerImages)
   composer.add(composerMenu)
 
   const status = new BoxRenderable(renderer, {
@@ -1703,8 +1714,12 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       const composerWidth = composerText.width > 0 ? composerText.width : renderer.terminalWidth - 6
       const drawer = composerBody(state.composer.draft, state.composer.error, composerWidth, state.composer.caret)
       const menu = mentionMenuLines(state.mentions, composerWidth)
-      composer.height = drawer.height + menu.length
+      const attached = attachmentLines(draftImages(state), composerWidth)
+      composer.height = drawer.height + attached.length + menu.length
       composerText.content = drawer.text
+      composerImages.height = attached.length
+      composerImages.visible = attached.length > 0
+      composerImages.content = attached.join('\n')
       composerMenu.height = menu.length
       composerMenu.visible = menu.length > 0
       composerMenu.content = menu.join('\n')
@@ -2032,12 +2047,24 @@ export const composerHeading = (state: AppState): string => {
   const target = id ? state.tweets[id] : undefined
   const who = target ? `@${target.author.handle}` : (id ?? 'tweet')
   const lead = composerLead(state.composer.mode, who)
-  const used = state.composer.draft.trim().length
+  // The [Image n] tokens never reach X, so they are not part of the 280.
+  const used = draftText(state.composer.draft).length
   const count = used > tweetTextLimit ? `${used}/${tweetTextLimit} too long` : `${used}/${tweetTextLimit}`
   if (state.composer.sending) {
     return `${lead} · sending…`
   }
   return `${lead} · ${count} · Enter sends · Esc closes`
+}
+
+// The pictures the draft carries, one row each. A picture cannot be drawn inside the drawer,
+// so this list is the only proof that a [Image n] token stands for real bytes.
+export const attachmentLines = (images: readonly DraftImage[], width: number): string[] => {
+  if (images.length === 0) {
+    return []
+  }
+  const head = `${images.length} image${images.length === 1 ? '' : 's'}  ·  delete the token to drop one`
+  const rows = images.map((image) => `  ${image.token}  ${image.name}  ·  ${Math.max(1, Math.round(image.data.length / 1024))} KB`)
+  return [head, ...rows].map((line) => (line.length > width ? `${line.slice(0, Math.max(1, width - 1))}…` : line))
 }
 
 // How many accounts the @ menu shows at once. More rows would push the draft off a short

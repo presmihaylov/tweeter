@@ -102,10 +102,11 @@ describe('which call the drawer makes', () => {
   const client: DraftSender = {
     replyToTweet: async () => { calls.push('reply'); return ok },
     quoteTweet: async () => { calls.push('quote'); return ok },
-    postTweet: async () => { calls.push('post'); return ok }
+    postTweet: async () => { calls.push('post'); return ok },
+    uploadImage: async () => ({ ok: true, mediaId: 'm1' })
   }
   const send = async (mode: 'reply' | 'quote' | 'post', target?: AppTweet): Promise<void> => {
-    await sendDraft({ client, mode, target, text: 'hi', onRetry: () => undefined })
+    await sendDraft({ client, mode, target, text: 'hi', mediaIds: [], onRetry: () => undefined })
   }
 
   test('the mode picks it', async () => {

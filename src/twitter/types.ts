@@ -139,6 +139,11 @@ export type LikeResult =
   | { ok: true }
   | { ok: false; error: string; code?: number; status?: number }
 
+// The id X gives a picture once it holds the bytes. The tweet then names the id.
+export type MediaResult =
+  | { ok: true; mediaId: string }
+  | { ok: false; error: string; status?: number }
+
 export type TwitterClientOptions = {
   authToken: string
   ct0: string
@@ -149,6 +154,8 @@ export type TwitterClientOptions = {
   timeoutMs?: number
   fetch?: Fetcher
   queryIdPath?: string
+  // Pictures go to their own host, so a test can point that one somewhere else.
+  uploadUrl?: string
   debugLogger?: DebugLogger
   // Injected so a test can walk the write retry backoff without waiting for it.
   sleep?: (ms: number) => Promise<void>

@@ -115,3 +115,9 @@ export const isCtrlEnterKey = (key: AppKey): boolean => {
   }
   return key.ctrl && (key.name === 'j' || key.name === 'm')
 }
+
+// A terminal cannot hand over a picture: Cmd+V on a clipboard that holds one sends nothing
+// at all. Ctrl+V is the press that tells the drawer to go and read the clipboard itself.
+// The terminal sends it as 0x16 when it does not name the key.
+export const isImagePasteKey = (key: AppKey): boolean =>
+  key.ctrl === true && (key.name === 'v' || key.sequence === '\u0016')
