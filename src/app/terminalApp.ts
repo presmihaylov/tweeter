@@ -35,6 +35,12 @@ export const copyMark = '⧉'
 export const mentionDelayMs = 180
 export const mentionCount = 10
 
+// Tab into a feed that holds nothing yet and the selection still names a tweet of the tab
+// left behind, so the detail pane drew it beside the cards of the new feed. The tab that
+// opens drops a selection it does not hold and takes the first tweet of its own page.
+export const selectionBelongs = (selectedTweetId: string | undefined, tweetIds: string[]): boolean =>
+  selectedTweetId === undefined || tweetIds.includes(selectedTweetId)
+
 export const cursorFor = (timeline: TimelineState | undefined, mode: FeedLoad): string | undefined => {
   if (mode === 'newer') {
     return timeline?.topCursor
@@ -415,7 +421,14 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
     const loadFeed = async (feed: TimelineId, mode: FeedLoad): Promise<void> => {
       const before = state.timelines[feed]?.tweetIds.length ?? 0
       const opening = state.timelines[feed] ?? emptyTimeline(feed)
-      state = { ...state, activeTab: feed, timelines: { ...state.timelines, [feed]: { ...opening, loading: true, error: undefined } }, status: feedLoadStatus(mode) }
+      const foreign = !selectionBelongs(state.selectedTweetId, opening.tweetIds)
+      state = {
+        ...state,
+        activeTab: feed,
+        timelines: { ...state.timelines, [feed]: { ...opening, loading: true, error: undefined } },
+        status: feedLoadStatus(mode),
+        ...(foreign ? { selectedTweetId: undefined, detailStack: [], selectedDetailId: undefined, repliesOpenFor: undefined, textFocused: false } : {})
+      }
       rerender()
       try {
         const page = await timelinePage(feed, mode)
@@ -1142,6 +1155,13 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
       : await client.checkAuth()
     state = { ...state, status: session.auth.ok ? state.status : session.auth.error }
     rerender()
+    // The feed that stood in for the auth check names nobody, so the rail would read
+    // "cookie session" where the handle belongs. This runs after the first paint, so the
+    // reader waits on the feed and not on the name.
+    if (session.auth.ok && session.auth.username === undefined) {
+      session.auth = { ...session.auth, ...await client.whoAmI() }
+      rerender()
+    }
   }
 
   // Kitty graphics live outside the OpenTUI frame buffer, so images are diffed and

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { cursorFor, feedLoadResult } from '../src/app/terminalApp.ts'
+import { cursorFor, feedLoadResult, selectionBelongs } from '../src/app/terminalApp.ts'
 import { initialAppState, mergeTimelinePage, needsOlderTweets, selectRelativeTweet } from '../src/state/store.ts'
 import type { AppTweet } from '../src/twitter/types.ts'
 import type { TimelineState } from '../src/state/store.ts'
@@ -106,5 +106,27 @@ describe('the older page trigger', () => {
     expect(needsOlderTweets(paged)).toBe(true)
     expect(needsOlderTweets({ ...paged, timelines: { ...paged.timelines, following: { ...paged.timelines.following, loading: true } } })).toBe(false)
     expect(needsOlderTweets(initialAppState())).toBe(false)
+  })
+})
+
+// The reported case: Tab moved to a feed that held nothing, the page loaded, and the detail
+// pane went on showing a tweet of the tab left behind beside the cards of the new one.
+describe('the selection when a feed opens', () => {
+  test('a tweet of the tab left behind does not belong to the feed that opens', () => {
+    const state = mergeTimelinePage(initialAppState(), 'following', tweets('2', '1'), {})
+    expect(selectionBelongs(state.selectedTweetId, state.timelines.forYou?.tweetIds ?? [])).toBe(false)
+    expect(selectionBelongs(state.selectedTweetId, state.timelines.following.tweetIds)).toBe(true)
+  })
+
+  test('a feed the reader is already on keeps its selection', () => {
+    const state = mergeTimelinePage(initialAppState(), 'following', tweets('2', '1'), {})
+    expect(selectionBelongs(state.selectedTweetId, state.timelines.following.tweetIds)).toBe(true)
+    expect(selectionBelongs(undefined, [])).toBe(true)
+  })
+
+  test('the page that lands picks the first tweet of the tab it belongs to', () => {
+    const following = mergeTimelinePage(initialAppState(), 'following', tweets('2', '1'), {})
+    const forYou = mergeTimelinePage({ ...following, selectedTweetId: undefined }, 'forYou', tweets('9', '8'), {})
+    expect(forYou.selectedTweetId).toBe('9')
   })
 })
