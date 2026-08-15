@@ -60,9 +60,9 @@ const articleImageCap = 10
 export type DetailLayout = { parent: number; text: number; media: number; quote: number; replies: number }
 
 // The replies view draws the author row, the header over the list and the metrics bar, and
-// nothing else: 4 rows of border and padding, 3 gaps between the four boxes, and 5 rows for
-// the three that are not the list.
-const repliesViewChrome = 4 + 3 + 5
+// nothing else: 4 rows of border and padding, a blank row over the header and over the
+// metrics bar, and 5 rows for the three boxes that are not the list.
+const repliesViewChrome = 4 + 2 + 5
 
 // Flex alone let the quote card eat the photo's rows, so the detail pane divides them
 // itself. Order of claim: the parent card, the quote card text, the tweet text, the
@@ -76,17 +76,23 @@ export const detailLayout = (paneHeight: number, opts: { photo: boolean; quote: 
   if (opts.repliesOpen === true) {
     return { parent: 0, text: 0, media: 0, quote: 0, replies: Math.max(0, paneHeight - repliesViewChrome) }
   }
-  const boxes = 6 + (opts.photo ? 1 : 0) + (opts.quote ? 1 : 0) + (opts.parent ? 1 : 0)
   // The border and padding take 4 rows. The author row, the caption, the replies header
-  // and the metrics bar take 6 more between them.
-  const body = Math.max(0, paneHeight - 4 - (boxes - 1) - 6)
+  // and the metrics bar take 6 more between them. Three blank rows set the text, the
+  // replies and the metrics bar apart, and a quote card pays for a fourth.
+  const blanks = 3 + (opts.quote ? 1 : 0)
+  const body = Math.max(0, paneHeight - 4 - blanks - 6)
   // The parent card is what the open tweet answers, so it is read before anything else.
   const parent = opts.parent ? Math.min(body, parentRows) : 0
   const quoteBase = opts.quote ? Math.min(body - parent, quoteRows) : 0
   // A short tweet gives its spare rows to the photo; a long one scrolls at the cap. An
   // article carries thousands of characters, so it keeps every row the pane can spare.
   const textRoom = body - parent - quoteBase
-  const mediaWant = opts.photo ? mediaFloor : 0
+  // The text can scroll and a photo cannot, so the photo asks for a share of the room rather
+  // than the floor. On the floor alone a tweet at the text cap left the photo three rows at
+  // every pane height, which is a sliver nobody can read. An article body outranks its cover
+  // photo, so an article keeps the photo on the floor.
+  const mediaShare = Math.min(mediaCap, Math.max(mediaFloor, Math.floor(textRoom / 2)))
+  const mediaWant = opts.photo ? (opts.article ? mediaFloor : mediaShare) : 0
   const cap = opts.article ? Math.max(detailTextCap, textRoom - mediaWant) : detailTextCap
   const natural = Math.min(cap, Math.max(detailTextFloor, opts.textLines))
   // The replies used to hold a whole card here, which is what squeezed a long tweet with a
@@ -105,9 +111,12 @@ export const detailLayout = (paneHeight: number, opts: { photo: boolean; quote: 
   // the photo left rather than scroll over blank ones.
   const spare = free - media
   const extra = Math.min(spare, Math.max(0, opts.textLines - text))
-  // What the text, the photo and the quote card leave over stays blank under them, which is
-  // what keeps the metrics bar on the bottom row of the pane.
-  return { parent, text: text + extra, media, quote: quoteBase + quoteExtra, replies: spare - extra }
+  // The reply list has a view of its own, so a row left over here only sits blank. A photo
+  // takes them instead of the blank; fitCells still holds the shape, so a wide picture stops
+  // at the width of the pane rather than grow to every row it is given. Without a photo the
+  // rows stay blank, which is what keeps the metrics bar on the bottom row of the pane.
+  const blank = spare - extra
+  return { parent, text: text + extra, media: media > 0 ? media + blank : 0, quote: quoteBase + quoteExtra, replies: media > 0 ? 0 : blank }
 }
 
 const namedEntities: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
@@ -650,8 +659,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     borderColor: '#30363d',
     backgroundColor: '#0d1117',
     padding: 1,
-    flexDirection: 'column',
-    gap: 1
+    flexDirection: 'column'
   })
   // x.com puts the answered tweet above the reply, so the reader sees what the reply
   // talks about. The card is a target of its own: Shift+↑ picks it, a click opens it.
@@ -753,10 +761,15 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   // The text is wrapped and sliced here rather than by the renderable, because a
   // wrapMode box cannot be scrolled. The body is a column rather than one text box,
   // because an article puts its images between the paragraphs.
+  // The pane spends its blank rows here, over the quote card, over the replies and over the
+  // metrics bar, and nowhere else. A blank row between every section cost six rows of a
+  // short pane, which is what left the photo three rows to draw in. The text, the caption
+  // and the picture are one block, the way x.com keeps them.
   const detailBody = new BoxRenderable(renderer, {
     id: 'detail-body',
     width: '100%',
     height: detailTextFloor,
+    marginTop: 1,
     flexShrink: 0,
     overflow: 'hidden',
     flexDirection: 'column'
@@ -783,6 +796,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     id: 'detail-quote',
     width: '100%',
     height: quoteRows,
+    marginTop: 1,
     flexShrink: 0,
     border: true,
     borderStyle: 'rounded',
@@ -847,7 +861,8 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     content: 'Replies',
     fg: '#f0f6fc',
     width: '100%',
-    height: 1
+    height: 1,
+    marginTop: 1
   })
   repliesHeader.onMouseDown = () => { opts.onToggleReplies?.() }
   // The replies are cards with avatars, like the timeline, so the same eye reads both.
@@ -865,6 +880,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
     id: 'detail-metrics-row',
     width: '100%',
     height: 1,
+    marginTop: 1,
     flexShrink: 0,
     flexDirection: 'row',
     gap: 1
@@ -1664,9 +1680,9 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       detailScroll = clampFlowScroll(detailItems, detailScroll, layout.text)
       // The arrows own the text now, so it brightens the way a selected card does.
       renderBody(flowBlock(detailItems, detailScroll, layout.text, state.textFocused), state.textFocused)
-      detailHints.content = listOpen
+      detailHints.content = fitHint(listOpen
         ? repliesHint(focused, state.detailStack.length)
-        : detailHint(focused, state.detailStack.length, parent !== undefined, { scrolls: flowRows(detailItems) > layout.text, focused: state.textFocused })
+        : detailHint(focused, state.detailStack.length, parent !== undefined, { scrolls: flowRows(detailItems) > layout.text, focused: state.textFocused }), detailHints.width)
       const parentSelected = parent !== undefined && parent.id === state.selectedDetailId
       parentBox.visible = parent !== undefined && !listOpen
       parentBox.height = layout.parent
@@ -1684,8 +1700,9 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       detailPosted.content = postedStamp
       detailPosted.width = postedStamp.length
       repliesList.height = layout.replies
+      repliesList.visible = layout.replies > 0
       // An empty image box would still claim its share of the pane, so hide it.
-      mediaText.visible = !listOpen
+      mediaText.visible = !listOpen && focused !== undefined
       mediaBox.visible = layout.media > 0
       mediaBox.height = layout.media
       mediaTiles = renderTiles(mediaTiles, { box: mediaBox, pane: detailPane, id: 'detail-media-tile', source: 'tweet', tweet: focused, visible: layout.media > 0 })
@@ -1706,6 +1723,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
         ? repliesTitle(replyIds.length, state.selectedDetailId ? replyIds.indexOf(state.selectedDetailId) : -1)
         : repliesClosedTitle(replyIds.length)
       repliesHeader.fg = listOpen ? '#f0f6fc' : '#58a6ff'
+      repliesHeader.visible = focused !== undefined
       renderReplyCards(state, layout.replies, listOpen)
       composer.visible = state.composer.open
       composerTitle.content = composerHeading(state)
@@ -1857,8 +1875,11 @@ const toPlacement = (slot: ImageSlot, shape: 'circle' | 'rect', cell: CellSize, 
 // states it both ways: how to go in, and how to come back out. The depth counts quotes
 // and replies alike, because both push onto the same stack.
 export const detailHint = (tweet: AppTweet | undefined, depth: number, hasParent = false, scroll?: { scrolls: boolean; focused: boolean }): string => {
+  // The body of an empty pane already asks for a selection. A second copy here, a media line
+  // about a tweet that is not there and a replies header over nothing made the empty pane
+  // read as four separate messages.
   if (!tweet) {
-    return 'Select a tweet with j/k.'
+    return ''
   }
   const parts: string[] = []
   if (scroll?.focused) {
@@ -1878,6 +1899,26 @@ export const detailHint = (tweet: AppTweet | undefined, depth: number, hasParent
   }
   return parts.join('  ·  ')
 }
+
+// The hint row is one line beside the avatar, and the renderable cuts what does not fit
+// without a mark: the replies hint ended on "← back to the" and lost its last word. Whole
+// parts go instead, so what is left still reads as an instruction, and the … says more went.
+export const fitHint = (text: string, width: number): string => {
+  if (width < 1 || text.length <= width) {
+    return text
+  }
+  const parts = text.split(hintSeparator)
+  while (parts.length > 1) {
+    parts.pop()
+    const kept = `${parts.join(hintSeparator)}${hintSeparator}…`
+    if (kept.length <= width) {
+      return kept
+    }
+  }
+  return parts[0] ?? ''
+}
+
+const hintSeparator = '  ·  '
 
 // x.com labels a reposted tweet with the name of whoever put it in the feed. Everything
 // else on the card already belongs to the original author.
@@ -2023,7 +2064,7 @@ export const repliesHint = (tweet: AppTweet | undefined, depth: number): string 
   if (!tweet) {
     return 'Select a tweet with j/k.'
   }
-  const parts = ['↑/↓ walks the replies', 'Shift+→ opens one', '← back to the tweet']
+  const parts = ['↑/↓ picks one', 'Shift+→ opens it', '← back to the tweet']
   if (depth > 0) {
     parts.push(`depth ${depth}  ·  Shift+← back`)
   }
@@ -2220,7 +2261,10 @@ export const metricsLine = (tweet: AppTweet): string => {
 // An article carries its pictures inside the body rather than under it, so the caption row
 // says how to enlarge one instead of claiming the tweet has no media at all.
 export const mediaLine = (tweet: AppTweet | undefined, items: FlowItem[]): string => {
-  if (tweet && tweet.media.length > 0) {
+  if (!tweet) {
+    return ''
+  }
+  if (tweet.media.length > 0) {
     return tweet.media.map(formatMedia).join('  ·  ')
   }
   const images = items.filter((item) => item.kind === 'image').length

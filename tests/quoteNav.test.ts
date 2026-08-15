@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createTestRenderer } from '@opentui/core/testing'
-import { createMainScreen, detailHint, type MainScreen } from '../src/app/mainScreen.ts'
+import { createMainScreen, detailHint, fitHint, repliesHint, type MainScreen } from '../src/app/mainScreen.ts'
 import type { ImagePlacement } from '../src/media/imageLayer.ts'
 import {
   enterSelection,
@@ -105,7 +105,28 @@ describe('quote navigation', () => {
     expect(detailHint(tweet('q1'), 1)).toBe('depth 1  ·  Shift+← back')
     expect(detailHint(tweet('q1', [], tweet('q2')), 1)).toBe('depth 1  ·  Shift+← back  ·  Shift+→ or click the quote')
     expect(detailHint(tweet('1'), 0)).toBe('')
-    expect(detailHint(undefined, 0)).toBe('Select a tweet with j/k.')
+    // The body of an empty pane carries that message on its own.
+    expect(detailHint(undefined, 0)).toBe('')
+  })
+
+  // The hint row is 62 cells beside the avatar on a 160 column terminal. The replies hint
+  // ran to 67 and lost its last word, so it read "← back to the" and stopped.
+  test('the hint line fits the row it is drawn on', () => {
+    expect(repliesHint(tweet('1'), 0).length).toBeLessThanOrEqual(62)
+    const long = detailHint(tweet('1', [], tweet('q1')), 2, true, { scrolls: false, focused: true })
+    expect(long.length).toBeGreaterThan(62)
+    const cut = fitHint(long, 62)
+    expect(cut.length).toBeLessThanOrEqual(62)
+    expect(cut.endsWith('  ·  …')).toBe(true)
+  })
+
+  test('a hint that fits is left alone, and a width of nothing changes nothing', () => {
+    expect(fitHint('↑/↓ scroll  ·  → replies', 62)).toBe('↑/↓ scroll  ·  → replies')
+    expect(fitHint('↑/↓ scroll  ·  → replies', 0)).toBe('↑/↓ scroll  ·  → replies')
+  })
+
+  test('a single part too wide for the row is handed over whole', () => {
+    expect(fitHint('Shift+↑ picks the card above', 10)).toBe('Shift+↑ picks the card above')
   })
 })
 

@@ -85,6 +85,23 @@ describe('a tweet that carries four pictures', () => {
   })
 })
 
+// The pane used to set every section apart with a blank row. On a half-screen terminal the
+// six blank rows were more than the picture got, and the photo drew three rows tall.
+describe('a photo on a half-screen terminal', () => {
+  test('draws taller than the sliver the blank rows left it', async () => {
+    const harness = await createTestRenderer({ width: 120, height: 32 })
+    const screen = createMainScreen(harness.renderer, {})
+    const state = mergeTimelinePage(initialAppState(), 'following', [tweet('1', photos(1))], {})
+    screen.render(state)
+    await harness.flush()
+    screen.render(state)
+    await harness.flush()
+    const drawn = tiles(screen, 'media:1:')
+    expect(drawn).toHaveLength(1)
+    expect(drawn[0]?.rows ?? 0).toBeGreaterThanOrEqual(6)
+  })
+})
+
 describe('the pictures a tweet offers', () => {
   test('stops at the four X allows', () => {
     expect(previewsOf(tweet('1', photos(6)))).toHaveLength(4)

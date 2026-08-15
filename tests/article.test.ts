@@ -105,14 +105,14 @@ describe('the rows an article claims', () => {
 
   test('takes every row the pane can spare', () => {
     const layout = detailLayout(50, { ...opts, article: true })
-    expect(layout.text).toBe(35)
+    expect(layout.text).toBe(37)
     expect(layout.replies).toBe(0)
   })
 
   // The photo claims its rows before a plain tweet, and after an article.
   test('an article outranks the cover photo, a plain tweet does not', () => {
-    expect(detailLayout(50, { ...opts, photo: true, article: true }).text).toBe(31)
-    expect(detailLayout(50, { ...opts, photo: true }).text).toBe(22)
+    expect(detailLayout(50, { ...opts, photo: true, article: true }).text).toBe(34)
+    expect(detailLayout(50, { ...opts, photo: true }).text).toBe(25)
   })
 
   test('leaves the cover photo its rows', () => {

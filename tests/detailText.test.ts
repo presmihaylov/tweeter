@@ -132,7 +132,7 @@ describe('detail scrolling', () => {
     // The timeline card also prints the first lines, so the assertions use lines that
     // only the detail pane can reach, plus the markers themselves.
     const first = harness.captureCharFrame()
-    expect(first).toContain('▾ 34 more below · Ctrl+S')
+    expect(first).toContain('▾ 32 more below · Ctrl+S')
     expect(first).not.toContain('▴')
 
     screen.scrollDetail(3)
@@ -140,13 +140,13 @@ describe('detail scrolling', () => {
     await harness.flush()
     const scrolled = harness.captureCharFrame()
     expect(scrolled).toContain('▴ 3 more above · Ctrl+W')
-    expect(scrolled).toContain('▾ 32 more below · Ctrl+S')
+    expect(scrolled).toContain('▾ 30 more below · Ctrl+S')
 
     screen.scrollDetail(-3)
     screen.render(state)
     await harness.flush()
     const back = harness.captureCharFrame()
-    expect(back).toContain('▾ 34 more below · Ctrl+S')
+    expect(back).toContain('▾ 32 more below · Ctrl+S')
     expect(back).not.toContain('▴')
   })
 
@@ -198,5 +198,23 @@ describe('reposts on the screen', () => {
   test('a plain tweet carries no repost mark', () => {
     expect(repostPill(tweetWith('plain'))).toBe('')
     expect(repostPill(reposted)).toBe('↻ U2 · ')
+  })
+})
+
+// An empty pane used to say four things at once: the hint line asked for a selection, the body
+// asked again, a media line named a tweet that was not there, and a replies header stood over
+// nothing.
+describe('the detail pane with nothing selected', () => {
+  test('asks for a selection once and says nothing else', async () => {
+    const harness = await createTestRenderer({ width: 174, height: 52 })
+    const screen = createMainScreen(harness.renderer, {})
+    screen.render(initialAppState())
+    await harness.flush()
+    screen.render(initialAppState())
+    await harness.flush()
+    const frame = harness.captureCharFrame()
+    expect(frame.split('Select a tweet with j/k.')).toHaveLength(2)
+    expect(frame).not.toContain('No media for selected tweet.')
+    expect(frame).not.toContain('click or → opens them')
   })
 })
