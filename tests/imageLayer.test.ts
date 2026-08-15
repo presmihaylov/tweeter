@@ -28,6 +28,30 @@ const harness = () => {
   return { writes, prepared, layer, settle }
 }
 
+// A layer whose every preparation throws, on a clock the test moves by hand.
+const failing = () => {
+  const writes: string[] = []
+  let tries = 0
+  let clock = 0
+  const layer = createImageLayer({
+    cellSize: () => ({ widthPx: 10, heightPx: 20 }),
+    write: (chunk) => { writes.push(chunk) },
+    now: () => clock,
+    prepare: async () => {
+      tries += 1
+      throw new Error('magick missing')
+    },
+    read: async () => new Uint8Array()
+  })
+  return {
+    writes,
+    layer,
+    attempts: () => tries,
+    advance: (ms: number) => { clock += ms },
+    settle: () => new Promise((resolve) => setTimeout(resolve, 0))
+  }
+}
+
 describe('image layer', () => {
   test('defers the first placement until the image is prepared', async () => {
     const { writes, prepared, layer, settle } = harness()
@@ -74,24 +98,63 @@ describe('image layer', () => {
     expect(writes[1]).toBe('\x1b_Ga=d,d=I,i=1,q=2\x1b\\')
   })
 
-  test('never retries a url whose preparation failed', async () => {
+  test('does not retry a failed url on the frames right after it failed', async () => {
+    const { writes, attempts, layer, settle } = failing()
+    layer.sync([placement()])
+    await settle()
+    layer.sync([placement()])
+    layer.sync([placement()])
+    expect(attempts()).toBe(1)
+    expect(writes).toEqual([])
+  })
+
+  // A lost network or a busy magick used to blacklist the picture for the whole run.
+  test('tries a failed url again once the delay has passed', async () => {
+    const { attempts, layer, settle, advance } = failing()
+    layer.sync([placement()])
+    await settle()
+    advance(2_000)
+    layer.sync([placement()])
+    await settle()
+    expect(attempts()).toBe(2)
+  })
+
+  test('gives up after the last delay rather than retry on every frame', async () => {
+    const { attempts, layer, settle, advance } = failing()
+    for (let round = 0; round < 6; round += 1) {
+      layer.sync([placement()])
+      await settle()
+      advance(60_000)
+    }
+    expect(attempts()).toBe(3)
+  })
+
+  test('a url that comes back draws, and holds no failure against it', async () => {
+    let broken = true
     const writes: string[] = []
-    let attempts = 0
+    let clock = 0
     const layer = createImageLayer({
       cellSize: () => ({ widthPx: 10, heightPx: 20 }),
       write: (chunk) => { writes.push(chunk) },
+      now: () => clock,
       prepare: async () => {
-        attempts += 1
-        throw new Error('magick missing')
+        if (broken) {
+          throw new Error('no network')
+        }
+        return '/prepared/a.png'
       },
-      read: async () => new Uint8Array()
+      read: async () => new Uint8Array([9, 9, 9])
     })
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
     layer.sync([placement()])
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await settle()
+    broken = false
+    clock += 2_000
     layer.sync([placement()])
+    await settle()
     layer.sync([placement()])
-    expect(attempts).toBe(1)
-    expect(writes).toEqual([])
+    expect(writes.length).toBe(1)
+    expect(writes[0]).toContain('a=T,f=100,i=1')
   })
 
   test('clear removes every image', () => {

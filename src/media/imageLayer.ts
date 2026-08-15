@@ -21,7 +21,13 @@ export type ImageLayerOptions = {
   prepare?: (req: PrepareRequest) => Promise<string>
   read?: (path: string) => Promise<Uint8Array>
   onReady?: () => void
+  now?: () => number
 }
+
+// A download that lost the network, or a magick that was busy, used to blacklist the picture
+// for as long as the app ran. It waits instead, and gives up after the last delay, so a dead
+// url still costs three tries and not one on every frame.
+const retryDelaysMs: readonly number[] = [2_000, 8_000]
 
 export type ImageLayer = {
   sync(desired: ImagePlacement[]): void
@@ -57,8 +63,18 @@ export const createImageLayer = (opts: ImageLayerOptions): ImageLayer => {
   const files = new Map<string, string>()
   const bytes = new Map<string, Uint8Array>()
   const pending = new Set<string>()
-  const failed = new Set<string>()
+  const failed = new Map<string, { tries: number; at: number }>()
+  const now = opts.now ?? (() => Date.now())
   let nextImageId = 1
+
+  const dueForRetry = (cacheKey: string): boolean => {
+    const failure = failed.get(cacheKey)
+    if (failure === undefined) {
+      return true
+    }
+    const delay = retryDelaysMs[failure.tries - 1]
+    return delay !== undefined && now() - failure.at >= delay
+  }
 
   const request = (placement: ImagePlacement, cell: CellSize): PrepareRequest => ({
     url: placement.url,
@@ -84,8 +100,11 @@ export const createImageLayer = (opts: ImageLayerOptions): ImageLayer => {
   const load = (cacheKey: string, req: PrepareRequest): void => {
     pending.add(cacheKey)
     void prepare(req)
-      .then(async (path) => { retain(cacheKey, path, await read(path)) })
-      .catch(() => { failed.add(cacheKey) })
+      .then(async (path) => {
+        retain(cacheKey, path, await read(path))
+        failed.delete(cacheKey)
+      })
+      .catch(() => { failed.set(cacheKey, { tries: (failed.get(cacheKey)?.tries ?? 0) + 1, at: now() }) })
       .finally(() => {
         pending.delete(cacheKey)
         opts.onReady?.()
@@ -111,7 +130,7 @@ export const createImageLayer = (opts: ImageLayerOptions): ImageLayer => {
         const cacheKey = prepareCacheKey(req)
         const path = files.get(cacheKey)
         if (!path) {
-          if (!pending.has(cacheKey) && !failed.has(cacheKey)) {
+          if (!pending.has(cacheKey) && dueForRetry(cacheKey)) {
             load(cacheKey, req)
           }
           continue
