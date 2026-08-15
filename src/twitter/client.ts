@@ -97,12 +97,30 @@ export class TwitterClient {
     try {
       const page = await this.loadHomeTimelinePage({ count: 1, following: true })
       if (page.tweets.length > 0) {
-        return { ok: true, source: 'timeline-probe' }
+        return { ok: true, ...await this.whoAmI(), source: 'timeline-probe' }
       }
     } catch {
       return { ok: false, error: 'X cookies rejected; refresh auth_token and ct0' }
     }
     return { ok: false, error: 'could not verify X credentials' }
+  }
+
+  // A feed that answers proves the cookies work but names nobody, which is why the rail read
+  // "cookie session" instead of the handle. The twid cookie carries the id, and one page of
+  // the profile timeline turns it into a name. A page that fails costs the name, not the
+  // session, so the caller keeps whatever it already knew.
+  async whoAmI(): Promise<{ username?: string; userId?: string; name?: string }> {
+    const userId = userIdFromCookies(this.headers.cookieHeader())
+    if (userId === undefined) {
+      return {}
+    }
+    try {
+      const profile = (await this.loadUserTweetsPage({ userId, count: 1 })).profile
+      return { userId, username: profile?.handle, name: profile?.name }
+    } catch (error) {
+      await this.debugLogger?.log('twitter.self.unnamed', { error: errorMessage(error) })
+      return { userId }
+    }
   }
 
   async loadHomeTimelinePage(args: { count: number; following: boolean; ranked?: boolean; cursor?: string }): Promise<TimelinePage> {
@@ -124,7 +142,7 @@ export class TwitterClient {
       variables.cursor = args.cursor
     }
     const { body } = await this.withQueryIdRetry(operationName, [], async (queryId) => {
-      return this.gql.get(operationName, queryId, variables, buildHomeTimelineFeatures())
+      return this.gql.getThenPost(operationName, queryId, variables, buildHomeTimelineFeatures())
     })
     const instructions = getHomeInstructions(body)
     return {
@@ -147,7 +165,7 @@ export class TwitterClient {
       variables.cursor = args.cursor
     }
     const { body } = await this.withQueryIdRetry('SearchTimeline', [], async (queryId) => {
-      return this.gql.get('SearchTimeline', queryId, variables, buildSearchFeatures())
+      return this.gql.getThenPost('SearchTimeline', queryId, variables, buildSearchFeatures())
     })
     const instructions = getSearchInstructions(body)
     return {
@@ -172,7 +190,7 @@ export class TwitterClient {
       variables.cursor = args.cursor
     }
     const { body } = await this.withQueryIdRetry('UserTweetsAndReplies', [], async (queryId) => {
-      return this.gql.get('UserTweetsAndReplies', queryId, variables, buildUserTweetsFeatures())
+      return this.gql.getThenPost('UserTweetsAndReplies', queryId, variables, buildUserTweetsFeatures())
     })
     const instructions = getUserTimelineInstructions(body)
     const profile = parseTimelineProfile(instructions, args.userId)
@@ -196,7 +214,7 @@ export class TwitterClient {
     const days = args.days + 1
     const variables = analyticsVariables(args.now, days)
     const { body } = await this.withQueryIdRetry(analyticsOperation, [], async (queryId) => {
-      return this.gql.get(analyticsOperation, queryId, variables, {})
+      return this.gql.getThenPost(analyticsOperation, queryId, variables, {})
     })
     return parseAnalytics(body, analyticsRange(args.now, days))
   }

@@ -89,11 +89,18 @@ export class QueryIdStore {
         }
       }
     }
+    // Several operations can share one chunk, so hold each one's source rather than
+    // download the same file once per operation.
+    const chunkSources = new Map<string, string | undefined>()
     for (const [operation, chunk] of Object.entries(lazyChunkOperations)) {
       if (operations[operation] !== undefined) {
         continue
       }
-      const found = await this.scanChunk(html, chunk, operation)
+      if (!chunkSources.has(chunk)) {
+        chunkSources.set(chunk, await this.fetchChunk(html, chunk))
+      }
+      const source = chunkSources.get(chunk)
+      const found = source === undefined ? undefined : findOperationId(source, operation)
       if (found) {
         operations[operation] = found
       }
@@ -104,7 +111,7 @@ export class QueryIdStore {
     return next
   }
 
-  private async scanChunk(html: string, chunkName: string, operation: string): Promise<string | undefined> {
+  private async fetchChunk(html: string, chunkName: string): Promise<string | undefined> {
     const url = chunkUrlOf(html, chunkName)
     if (url === undefined) {
       return undefined
@@ -113,7 +120,7 @@ export class QueryIdStore {
     if (!response.ok) {
       return undefined
     }
-    return findOperationId(await response.text(), operation)
+    return await response.text()
   }
 }
 

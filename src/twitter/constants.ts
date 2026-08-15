@@ -3,18 +3,22 @@ export const defaultBaseUrl = 'https://x.com'
 export const defaultGraphQLBase = 'https://x.com/i/api/graphql'
 export const defaultUserAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36'
 
+// What every call starts from before discovery answers, and what it falls back to when the
+// x.com shell cannot be read. X rotates these, so they go stale: refreshed 2026-08-15 off
+// the live bundle, where seven of the twelve had already moved.
 export const fallbackQueryIds: Readonly<Record<string, string>> = {
-  TweetDetail: '97JF30KziU00483E_8elBA',
-  HomeTimeline: 'edseUwk9sP5Phz__9TIRnA',
-  HomeLatestTimeline: 'iOEZpOdfekFsxSlPQCQtPg',
-  UserByScreenName: 'xc8f1g7BYqr6VTzTbvNlGw',
-  CreateTweet: 'wUgPBh9hEKhMMGlg8uDuFw',
+  TweetDetail: 'XMOz5h24KAZ86qKffKTLdQ',
+  HomeTimeline: 'wp06oo3fRGU4P1sK8rECqQ',
+  HomeLatestTimeline: 'BLQWpfVqtgBqAqwRRJcJjA',
+  UserByScreenName: 'Gb-d6r0vxPOADdG62OEBpQ',
+  UserTweetsAndReplies: 'qUpkZU6eN8MbtQb7rC_pYg',
+  CreateTweet: 'WXTdKnLddrQOunD6MhWi3g',
   DeleteTweet: 'nxpZCY2K-I6QoFHAHeojFQ',
   FavoriteTweet: 'lI07N6Otwv1PhnEgXILM7A',
   UnfavoriteTweet: 'ZYKSe-w7KEslx3JhSIk5LA',
   CreateBookmark: 'aoDbu3RHznuiSkQ9aNM67Q',
   DeleteBookmark: 'Wlmlj2-xzyS1GN3a6cj-mQ',
-  SearchTimeline: 'PusO6nN_nUSAsfJktZJd9w',
+  SearchTimeline: 'hyPfJYJ_XAtDYoslQc-Rgg',
   accountOverviewDailyQuery: '_P1caq0YB4SVuEtFLPDMfQ'
 }
 
@@ -23,8 +27,13 @@ export const fallbackQueryIds: Readonly<Record<string, string>> = {
 // discovery has to build the chunk URL out of the shell's own chunk map.
 export const analyticsOperation = 'accountOverviewDailyQuery'
 
+// The feed reads are in the same boat, and worse: they are the two the whole app rests on.
+// x.com moved them out of the main bundle into the chunk it loads with the home column, so
+// the main-bundle scan finds nothing and every feed falls back to a hardcoded id.
 export const lazyChunkOperations: Readonly<Record<string, string>> = {
-  [analyticsOperation]: 'bundle.AccountAnalytics'
+  [analyticsOperation]: 'bundle.AccountAnalytics',
+  HomeTimeline: 'shared~bundle.LoggedInMain~bundle.HomeTimeline',
+  HomeLatestTimeline: 'shared~bundle.LoggedInMain~bundle.HomeTimeline'
 }
 
 export const tweetTextLimit = 280
@@ -138,9 +147,6 @@ export const retryDelaysFor = (code: number | undefined): readonly number[] => {
   return []
 }
 
-export const tweetDetailQueryIdFallbacks = ['97JF30KziU00483E_8elBA', 'aFvUsJm2c-oDkJV75blV6g'] as const
-// The read the stats page makes was added after the last known-good id set, so it carries
-// no fallback: discovery reads its id off the x.com bundle like every other one.
-export const discoveredOperations = ['UserTweetsAndReplies']
+export const tweetDetailQueryIdFallbacks = ['XMOz5h24KAZ86qKffKTLdQ', '97JF30KziU00483E_8elBA', 'aFvUsJm2c-oDkJV75blV6g'] as const
 
-export const targetOperations = [...Object.keys(fallbackQueryIds), ...discoveredOperations]
+export const targetOperations = Object.keys(fallbackQueryIds)

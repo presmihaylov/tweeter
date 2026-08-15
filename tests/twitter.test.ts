@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { HeaderBuilder } from '../src/twitter/headers.ts'
 import { extractMedia } from '../src/twitter/extract/media.ts'
 import { parseConversationTweets, parseHomeTweets, parseTweetsFromInstructions, upsizeAvatar } from '../src/twitter/extract/tweet.ts'
-import { chunkUrlOf, findOperationId } from '../src/twitter/queryIds.ts'
+import { chunkUrlOf, findOperationId, QueryIdStore } from '../src/twitter/queryIds.ts'
 import { TwitterClient } from '../src/twitter/client.ts'
 import { tweetUrl } from '../src/media/openExternal.ts'
 import { asReplyTo, asRepost, homeConversationEntry, homeEntries, homeTweetEntry, jsonResponse, makeTweetResult, promotedThreadEntry, promotedTweetEntry, relatedTweetsEntry, textResponse, timelineBody, tweetDetailBody, videoEntity, withQuotedTweet } from './helpers.ts'
@@ -125,6 +128,50 @@ describe('the lazy chunks of the x.com shell', () => {
   })
 })
 
+// x.com moved the two feed reads out of the main bundle and into the chunk it loads with
+// the home column, so the bundle scan found neither and every feed ran on a hardcoded id.
+describe('the feed ids behind a lazy chunk', () => {
+  const base = 'https://abs.twimg.test/responsive-web/client-web/'
+  const shell = [
+    '<html><script src="https://abs.twimg.test/responsive-web/client-web/main.aaa.js"></script>',
+    '<script>var p={};p.u=e=>""+(({7:"shared~bundle.LoggedInMain~bundle.HomeTimeline"})[e]||e)+"."+({7:"9f0d1c2"})[e]+"a.js";',
+    'p.p="https://abs.twimg.test/responsive-web/client-web/";</script></html>'
+  ].join('')
+  const homeChunk = [
+    '{queryId:"wp06oo3fRGU4P1sK8rECqQ",operationName:"HomeTimeline",operationType:"query"}',
+    '{queryId:"BLQWpfVqtgBqAqwRRJcJjA",operationName:"HomeLatestTimeline",operationType:"query"}'
+  ].join(',')
+
+  const run = async (): Promise<{ cache: Awaited<ReturnType<QueryIdStore['refresh']>>; asked: string[] }> => {
+    const asked: string[] = []
+    const fetchImpl = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input)
+      asked.push(url)
+      if (url.startsWith(`${base}shared~bundle.LoggedInMain~bundle.HomeTimeline.`)) {
+        return textResponse(homeChunk)
+      }
+      if (url.endsWith('main.aaa.js')) {
+        return textResponse('queryId:"onlyTheOtherOne00",operationName:"FavoriteTweet"')
+      }
+      return textResponse(shell)
+    }
+    const dir = await mkdtemp(join(tmpdir(), 'tweeter-qid-'))
+    const store = new QueryIdStore(join(dir, 'queryIds.json'), fetchImpl)
+    return { cache: await store.refresh('https://x.test'), asked }
+  }
+
+  test('reads both feed ids off the chunk the main bundle never carries', async () => {
+    const { cache } = await run()
+    expect(cache.operations.HomeTimeline).toBe('wp06oo3fRGU4P1sK8rECqQ')
+    expect(cache.operations.HomeLatestTimeline).toBe('BLQWpfVqtgBqAqwRRJcJjA')
+  })
+
+  test('asks for the shared chunk once, not once for each operation on it', async () => {
+    const { asked } = await run()
+    expect(asked.filter((url) => url.includes('bundle.HomeTimeline.')).length).toBe(1)
+  })
+})
+
 describe('TwitterClient read paths', () => {
   test('auth, timeline, and replies use expected flows', async () => {
     const focal = makeTweetResult('10', 'alice', 'root')
@@ -150,6 +197,52 @@ describe('TwitterClient read paths', () => {
     expect(page.tweets[0]?.id).toBe('10')
     const replies = await client.loadRepliesPage({ tweetId: '10' })
     expect(replies.replies[0]?.id).toBe('11')
+  })
+
+  // X retired the v1.1 account endpoints, so the probe is what names the session. It used to
+  // name nobody, and the rail then read "cookie session" where the handle belongs.
+  describe('naming a cookie session', () => {
+    const userId = '785034960117858304'
+    const cookieHeader = `auth_token=auth; ct0=csrf; twid=${encodeURIComponent(`u=${userId}`)}`
+    const profileCard = {
+      rest_id: '1',
+      core: { user_results: { result: { rest_id: userId, core: { screen_name: 'me', name: 'Me' } } } },
+      legacy: { full_text: 'post', created_at: 'Mon Jan 01 00:00:00 +0000 2024', conversation_id_str: '1' }
+    }
+    const profileBody = {
+      data: { user: { result: { timeline_v2: { timeline: { instructions: [{ type: 'TimelineAddEntries', entries: [{ entryId: 'tweet-1', content: { itemContent: { tweet_results: { result: profileCard } } } }] }] } } } } }
+    }
+
+    const clientWith = (cookie: string, profile: unknown): TwitterClient => {
+      const fetchMock = async (input: RequestInfo | URL): Promise<Response> => {
+        const url = input.toString()
+        if (url.includes('HomeLatestTimeline')) {
+          return jsonResponse(timelineBody([makeTweetResult('10', 'alice', 'root')]))
+        }
+        if (url.includes('UserTweetsAndReplies')) {
+          return profile === undefined ? textResponse('', { status: 500 }) : jsonResponse(profile)
+        }
+        return jsonResponse({}, { status: 404 })
+      }
+      return new TwitterClient({ authToken: 'auth', ct0: 'csrf', cookieHeader: cookie, fetch: fetchMock, graphQLBase: 'https://x.com/i/api/graphql' })
+    }
+
+    test('reads the handle behind the id the twid cookie carries', async () => {
+      const auth = await clientWith(cookieHeader, profileBody).checkAuth()
+      expect(auth).toMatchObject({ ok: true, source: 'timeline-probe', username: 'me', name: 'Me', userId })
+    })
+
+    test('a profile that will not load costs the name, not the session', async () => {
+      const auth = await clientWith(cookieHeader, undefined).checkAuth()
+      expect(auth).toMatchObject({ ok: true, userId })
+      expect(auth.ok && auth.username).toBeUndefined()
+    })
+
+    test('cookies that name no account still sign in', async () => {
+      const auth = await clientWith('auth_token=auth; ct0=csrf', profileBody).checkAuth()
+      expect(auth).toMatchObject({ ok: true, source: 'timeline-probe' })
+      expect(auth.ok && auth.userId).toBeUndefined()
+    })
   })
 
   test('sends the sort as enableRanking, and only on the Following feed', async () => {

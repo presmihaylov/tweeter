@@ -55,12 +55,14 @@ export class GraphQLClient {
     return { body: await parseJson(response), status: response.status }
   }
 
+  // X keeps moving reads to POST-only, and a GET against one of those answers with a bare 404
+  // that is indistinguishable from a dead query id. Retrying as POST tells the two apart.
   async getThenPost(operationName: string, queryId: string, variables: GraphQLPayload, features: FeatureMap, fieldToggles?: FeatureMap): Promise<{ body: unknown; status: number }> {
     const first = await this.get(operationName, queryId, variables, features, fieldToggles)
     if (first.status !== 404) {
       return first
     }
-    return this.post(operationName, queryId, variables, features)
+    return this.post(operationName, queryId, variables, features, fieldToggles)
   }
 }
 
