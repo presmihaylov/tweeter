@@ -14,7 +14,7 @@ import { buildStatsRows, statsTotals, type StatsWindow } from '../stats/aggregat
 import type { AnalyticsHistory } from '../twitter/analytics.ts'
 import { createImageLayer, writeToTerminal, type ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize } from '../media/geometry.ts'
-import { detectImageRenderer } from '../media/detect.ts'
+import { resolveImageRenderer } from '../media/detect.ts'
 import { kittyDeleteAll } from '../media/kitty.ts'
 import { copyToClipboard, openExternal, tweetUrl } from '../media/openExternal.ts'
 import { readClipboardImage } from '../media/clipboardImage.ts'
@@ -163,6 +163,9 @@ export type TerminalAppOptions = {
 const bracketedPaste = (on: boolean): string => `${String.fromCharCode(0x1b)}[?2004${on ? 'h' : 'l'}`
 
 export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> => {
+  // Ask the terminal about images before OpenTUI owns stdin; the answer would otherwise
+  // reach the key parser and read as keystrokes.
+  const imageRenderer = await resolveImageRenderer(opts.renderer ?? 'auto')
   const renderer = await createCliRenderer({
     onDestroy: () => { writeToTerminal(bracketedPaste(false)) },
     screenMode: 'alternate-screen',
@@ -1167,7 +1170,8 @@ export const runTerminalApp = async (opts: TerminalAppOptions): Promise<void> =>
   // Kitty graphics live outside the OpenTUI frame buffer, so images are diffed and
   // written straight to stdout after each painted frame.
   const attachImageLayer = (screen: { placements(): ImagePlacement[] }): void => {
-    if (detectImageRenderer(opts.renderer ?? 'auto') !== 'kitty') {
+    if (imageRenderer !== 'kitty') {
+      void debugLogger.log('images.skipped', { renderer: imageRenderer, term: process.env.TERM ?? '' })
       return
     }
     // The first frame carries the least interesting placements, so the log follows every

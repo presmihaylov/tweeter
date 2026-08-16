@@ -2,7 +2,38 @@ import { describe, expect, test } from 'bun:test'
 import { chunkBase64, kittyDelete, kittyDeleteAll, kittyPlace, moveCursor } from '../src/media/kitty.ts'
 import { cellSize, fitCells, parseCellOverride } from '../src/media/geometry.ts'
 import { magickArgs, prepareCacheKey, preparedPath } from '../src/media/prepare.ts'
-import { detectImageRenderer } from '../src/media/detect.ts'
+import { detectImageRenderer, kittyQuery, kittyQueryAnswered, probeKittyGraphics, resolveImageRenderer } from '../src/media/detect.ts'
+import { EventEmitter } from 'node:events'
+
+// A terminal that answers the query one tick after it is asked.
+const fakeTty = (reply: string): { input: NodeJS.ReadStream; output: NodeJS.WriteStream; raw: boolean; written: string } => {
+  const emitter = new EventEmitter()
+  const state = { raw: false, written: '', paused: true }
+  const input = Object.assign(emitter, {
+    isTTY: true,
+    get isRaw() { return state.raw },
+    isPaused: () => state.paused,
+    setRawMode: (on: boolean) => { state.raw = on; return input },
+    resume: () => { state.paused = false; return input },
+    pause: () => { state.paused = true; return input }
+  }) as unknown as NodeJS.ReadStream
+  const output = {
+    isTTY: true,
+    write: (chunk: string) => {
+      state.written += chunk
+      if (reply !== '') {
+        setTimeout(() => { emitter.emit('data', Buffer.from(reply, 'latin1')) }, 0)
+      }
+      return true
+    }
+  } as unknown as NodeJS.WriteStream
+  return {
+    input,
+    output,
+    get raw() { return state.raw },
+    get written() { return state.written }
+  }
+}
 
 describe('kitty encoder', () => {
   test('splits a payload into 4096 byte chunks', () => {
@@ -90,6 +121,60 @@ describe('renderer detection', () => {
   test('sniffs ghostty and kitty from the terminal', () => {
     expect(withEnv({ TWEETER_IMAGE_RENDERER: '', TERM: 'xterm-kitty', TERM_PROGRAM: '' }, () => detectImageRenderer())).toBe('kitty')
     expect(withEnv({ TWEETER_IMAGE_RENDERER: '', TERM: 'xterm-256color', TERM_PROGRAM: '' }, () => detectImageRenderer())).toBe('chafa')
+  })
+
+  test('a terminal that answers the query draws images, whatever TERM says', async () => {
+    const renderer = await withEnv({ TWEETER_IMAGE_RENDERER: '', TERM: 'xterm-256color', TERM_PROGRAM: '' }, () =>
+      resolveImageRenderer('auto', async () => true))
+    expect(renderer).toBe('kitty')
+  })
+
+  test('falls back to the sniff when the terminal answers nothing', async () => {
+    const renderer = await withEnv({ TWEETER_IMAGE_RENDERER: '', TERM: 'xterm-256color', TERM_PROGRAM: '' }, () =>
+      resolveImageRenderer('auto', async () => false))
+    expect(renderer).toBe('chafa')
+  })
+
+  test('an explicit request skips the query', async () => {
+    let asked = false
+    const renderer = await resolveImageRenderer('none', async () => { asked = true; return true })
+    expect(renderer).toBe('none')
+    expect(asked).toBe(false)
+  })
+})
+
+describe('the kitty capability query', () => {
+  test('asks for a pixel and follows it with a device attributes request', () => {
+    expect(kittyQuery(31)).toBe('\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c')
+  })
+
+  test('reads the OK the terminal sends back', () => {
+    expect(kittyQueryAnswered('\x1b_Gi=31;OK\x1b\\\x1b[?62;22c')).toBe(true)
+    expect(kittyQueryAnswered('\x1b[?62;22c')).toBe(false)
+  })
+
+  test('a terminal without a tty draws nothing', async () => {
+    const input = { isTTY: false } as unknown as NodeJS.ReadStream
+    const output = { isTTY: true } as unknown as NodeJS.WriteStream
+    expect(await probeKittyGraphics({ input, output })).toBe(false)
+  })
+
+  test('gives up once the device attributes come back alone', async () => {
+    const stream = fakeTty('\x1b[?62;22c')
+    expect(await probeKittyGraphics({ input: stream.input, output: stream.output, timeoutMs: 5_000 })).toBe(false)
+    expect(stream.raw).toBe(false)
+  })
+
+  test('takes the OK and leaves the terminal as it found it', async () => {
+    const stream = fakeTty('\x1b_Gi=31;OK\x1b\\\x1b[?62;22c')
+    expect(await probeKittyGraphics({ input: stream.input, output: stream.output, timeoutMs: 5_000 })).toBe(true)
+    expect(stream.written).toBe(kittyQuery())
+    expect(stream.raw).toBe(false)
+  })
+
+  test('gives up when the terminal says nothing at all', async () => {
+    const stream = fakeTty('')
+    expect(await probeKittyGraphics({ input: stream.input, output: stream.output, timeoutMs: 20 })).toBe(false)
   })
 })
 
