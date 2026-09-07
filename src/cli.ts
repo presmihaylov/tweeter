@@ -7,6 +7,7 @@ import { runTerminalApp } from './app/terminalApp.ts'
 import { TwitterClient } from './twitter/client.ts'
 import { runAuthorizeFlow } from './auth/twitterAuthFlow.ts'
 import { errorMessage } from './utils/result.ts'
+import { failure, parsePublishArgs, publishUsage, runPublish, UsageError, type PublishCommand, type Publisher } from './headless/publish.ts'
 
 type RunOptions = {
   profile?: string
@@ -34,6 +35,8 @@ Usage:
   tweeter --set-cookie-header 'name=value; ...' [--profile name]
   tweeter --reset-auth
   tweeter auth twitter --client-id <id> [--profile name] [--port N] [--no-browser]
+  tweeter post --text <text> [--dry-run]            (headless, JSON out)
+  tweeter reply --to <id|url> --text <text> [--dry-run]
 
 Keys:
   ? shows every key in a popup. q quit, R refresh, Tab switch feed, j/k select.
@@ -198,6 +201,57 @@ const runAuthTwitter = async (argv: string[]): Promise<void> => {
   console.log(`Saved X API tokens to profile "${selected.name}" (scope: ${result.tokens.scope ?? 'unknown'})`)
 }
 
+const readText = async (opts: { text?: string; textFile?: string }): Promise<string> => {
+  if (opts.text !== undefined) {
+    return opts.text
+  }
+  const path = opts.textFile ?? ''
+  if (path === '-') {
+    return await Bun.stdin.text()
+  }
+  return await Bun.file(path).text()
+}
+
+const runPublishCommand = async (command: PublishCommand, argv: string[]): Promise<void> => {
+  const opts = parsePublishArgs(command, argv)
+  if (opts.help) {
+    console.log(publishUsage)
+    return
+  }
+  const text = await readText(opts)
+  // A dry run must work on a machine with no cookies, so it never looks at the config.
+  if (opts.dryRun) {
+    const outcome = await runPublish(opts, text, refuseToPublish)
+    console.log(outcome.stdout)
+    process.exitCode = outcome.exitCode
+    return
+  }
+  const store = new ConfigStore()
+  const config = await store.load()
+  const selected = getProfile(config, opts.profile)
+  if (!selected) {
+    const outcome = failure(1, 'no profile configured; run `tweeter` once to set up cookies first')
+    console.log(outcome.stdout)
+    process.exitCode = outcome.exitCode
+    return
+  }
+  const client = new TwitterClient({
+    authToken: selected.profile.authToken,
+    ct0: selected.profile.ct0,
+    cookieHeader: selected.profile.cookieHeader
+  })
+  const outcome = await runPublish(opts, text, client)
+  console.log(outcome.stdout)
+  process.exitCode = outcome.exitCode
+}
+
+// runPublish answers a dry run before it publishes, so this stands in for a client
+// that is never built. Reaching it would be a bug, and it says so instead of posting.
+const refuseToPublish: Publisher = {
+  postTweet: async () => ({ ok: false, error: 'dry run reached the publisher' }),
+  replyToTweet: async () => ({ ok: false, error: 'dry run reached the publisher' })
+}
+
 const runMainCommand = async (argv: string[]): Promise<void> => {
   const opts = parseRunArgs(argv)
   if (opts.help) {
@@ -247,6 +301,10 @@ const runMainCommand = async (argv: string[]): Promise<void> => {
 
 const main = async (): Promise<void> => {
   const argv = process.argv.slice(2)
+  if (argv[0] === 'post' || argv[0] === 'reply') {
+    await runPublishCommand(argv[0], argv.slice(1))
+    return
+  }
   if (argv[0] === 'auth') {
     if (argv[1] === 'twitter') {
       await runAuthTwitter(argv.slice(2))
@@ -260,6 +318,13 @@ const main = async (): Promise<void> => {
 }
 
 main().catch((error: unknown) => {
+  // A headless caller parses stdout, so a bad flag answers in JSON like every other outcome.
+  if (error instanceof UsageError) {
+    const outcome = failure(2, error.message)
+    console.log(outcome.stdout)
+    process.exitCode = outcome.exitCode
+    return
+  }
   console.error(errorMessage(error))
   process.exitCode = 1
 })
