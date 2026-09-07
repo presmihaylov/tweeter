@@ -280,6 +280,25 @@ Exit codes: `0` posted (or dry run), `1` X refused the write or no profile is co
 
 Both commands go through the same cookies and the same `CreateTweet` mutation the TUI uses, so anything that works in the TUI works here.
 
+## Embedding tweeter in another app
+
+`src/embed/` is the surface another Bun app may import. Everything else under `src/` is
+tweeter's own business and moves without warning.
+
+```ts
+import { openSession, tweetCard, avatarSlot, createImageLayer, cellSize } from 'tweeter/embed'
+
+const { client } = await openSession()            // Pres's saved cookies, nothing else
+const { tweet } = await client.getTweet('1870000000000000101')
+const built = tweetCard(renderer, { id: tweet.id, tweet })
+pane.add(built.card)                              // the same card the timeline draws
+const slot = avatarSlot(tweet.id, tweet, built, pane)   // hand it to an image layer
+```
+
+The card is not a copy: `mainScreen` builds its timeline cards with `tweetCard` too, so a
+change to the card shows in both apps at once. Writing goes through the same client, which
+means `client.replyToTweet` and `client.postTweet`, not a second code path.
+
 ## Useful env vars
 
 - `TWEETER_CONFIG_DIR` — override config dir for tests/dev (default `~/.config/tweeter`)

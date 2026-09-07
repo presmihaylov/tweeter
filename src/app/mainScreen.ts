@@ -7,6 +7,11 @@ import type { CellSize, ImagePlacement } from '../media/imageLayer.ts'
 import { cellSize, fitCells } from '../media/geometry.ts'
 import { absoluteTime, relativeTime } from '../utils/time.ts'
 import { statsBodyLines } from './statsView.ts'
+import { articlePill, authorRow, avatarCols, avatarRows, bookmarkCount, cardAuthorLine, cardBox, cardHeight, cardMetrics, decodeEntities, likeCount, repostPill, toPlacement, tweetCard, type ImageSlot } from '../embed/tweetCard.ts'
+
+// The card and its parts live in ../embed so another app can draw the same tweet. They
+// were exported from here first, so they still are.
+export { articlePill, bookmarkCount, decodeEntities, likeCount, repostPill }
 
 export type MainScreen = {
   render(state: AppState, auth?: AuthStatus): void
@@ -36,10 +41,6 @@ export type MainScreenOptions = {
   now?: () => Date
 }
 
-// Reserved cells; toPlacement shrinks this to the largest square the font metrics allow.
-const avatarCols = 7
-const avatarRows = 3
-const cardHeight = 6
 // Border rows plus the author line and two text rows next to the avatar.
 const quoteRows = avatarRows + 2
 const parentRows = avatarRows + 2
@@ -109,19 +110,6 @@ export const detailLayout = (paneHeight: number, opts: { photo: boolean; quote: 
   // what keeps the metrics bar on the bottom row of the pane.
   return { parent, text: text + extra, media, quote: quoteBase + quoteExtra, replies: spare - extra }
 }
-
-const namedEntities: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
-
-// X returns tweet text with the HTML entities still escaped, so a quoted ">" arrives
-// as "&gt;" and would otherwise reach the screen that way.
-export const decodeEntities = (text: string): string =>
-  text.replace(/&(amp|lt|gt|quot|apos|nbsp|#\d+);/g, (match, name: string) => {
-    if (!name.startsWith('#')) {
-      return namedEntities[name] ?? match
-    }
-    const code = Number.parseInt(name.slice(1), 10)
-    return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : match
-  })
 
 // Wraps on word boundaries and keeps the tweet's own blank lines, so paragraphs survive.
 export const wrapText = (text: string, width: number): string[] => {
@@ -317,17 +305,6 @@ export const scrollWindow = (total: number, selectedIndex: number, capacity: num
     return Math.min(maxTop, selectedIndex - capacity + 1)
   }
   return clamped
-}
-
-type ImageSlot = {
-  key: string
-  url: string
-  box: BoxRenderable
-  pane: BoxRenderable
-  width?: number
-  height?: number
-  minCols?: number
-  minRows?: number
 }
 
 // One tile per picture on the tweet. The row is rebuilt on every frame, the way the cards
@@ -1397,7 +1374,7 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
       const column = new BoxRenderable(renderer, { id: `reply-card-${id}-column`, flexGrow: 1, height: '100%', flexDirection: 'column' })
       column.add(authorRow(renderer, {
         id: `reply-card-${id}-author`,
-        author: `${articlePill(reply)}${repostPill(reply)}${reply.author.name}${reply.author.verified ? ' ✔' : ''}  @${reply.author.handle}${reply.quotedTweet ? '  quote' : ''}`,
+        author: cardAuthorLine(reply, reply.quotedTweet ? '  quote' : ''),
         posted: relativeTime(reply.createdAt, now()),
         fg: selected ? '#58a6ff' : '#f0f6fc'
       }))
@@ -1438,51 +1415,18 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
   // Both lists draw the same card, so the timeline and the notifications tab build it here. A
   // post opened out of a notice line steps in, the way x.com lists it under its heading.
   const addTweetCard = (id: string, tweet: AppTweet, selected: boolean, nested = false): void => {
-    const card = cardBox(renderer, `tweet-card-${id}`, selected)
+    const mediaPill = tweet.media.length > 0 ? `  ${tweet.media.map((item) => item.type === 'photo' ? 'image' : item.type).join(' · ')}` : ''
+    const built = tweetCard(renderer, { id, tweet, selected, trailing: mediaPill, now: now() })
+    const card = built.card
     if (nested) {
       // A width of 100% plus a margin is wider than the pane, so the card stretches instead.
       card.marginLeft = 2
       card.width = 'auto'
     }
-    const avatar = new BoxRenderable(renderer, {
-      id: `tweet-card-${id}-avatar`,
-      width: avatarCols,
-      height: avatarRows
-    })
-    const column = new BoxRenderable(renderer, {
-      id: `tweet-card-${id}-column`,
-      flexGrow: 1,
-      height: '100%',
-      flexDirection: 'column'
-    })
-    const mediaPill = tweet.media.length > 0 ? `  ${tweet.media.map((item) => item.type === 'photo' ? 'image' : item.type).join(' · ')}` : ''
-    column.add(authorRow(renderer, {
-      id: `tweet-card-${id}-author`,
-      author: `${articlePill(tweet)}${repostPill(tweet)}${tweet.author.name}${tweet.author.verified ? ' ✔' : ''}  @${tweet.author.handle}${mediaPill}`,
-      posted: relativeTime(tweet.createdAt, now()),
-      fg: selected ? '#58a6ff' : '#f0f6fc'
-    }))
-    column.add(new TextRenderable(renderer, {
-      id: `tweet-card-${id}-body`,
-      content: decodeEntities(tweet.text).replaceAll('\n', ' '),
-      fg: '#c9d1d9',
-      width: '100%',
-      height: 2,
-      wrapMode: 'word'
-    }))
-    column.add(new TextRenderable(renderer, {
-      id: `tweet-card-${id}-metrics`,
-      content: cardMetrics(tweet),
-      fg: '#7d8590',
-      width: '100%',
-      height: 1
-    }))
-    card.add(avatar)
-    card.add(column)
     timelineCards.add(card)
     cards.push(card)
     if (tweet.author.avatarUrl) {
-      slots.push({ key: `avatar:${id}`, url: tweet.author.avatarUrl, box: avatar, pane: timelineCards, width: 1, height: 1, minCols: avatarCols, minRows: avatarRows })
+      slots.push({ key: `avatar:${id}`, url: tweet.author.avatarUrl, box: built.avatar, pane: timelineCards, width: 1, height: 1, minCols: avatarCols, minRows: avatarRows })
     }
   }
 
@@ -1786,73 +1730,6 @@ export const createMainScreen = (renderer: CliRenderer, opts: MainScreenOptions 
 // The name and the handle already fill a card line, so an appended stamp is the first
 // thing truncate throws away. The stamp gets its own cell instead, and only the name gives
 // ground when the card is narrow.
-const authorRow = (
-  renderer: CliRenderer,
-  args: { id: string; author: string; posted: string; fg: string }
-): BoxRenderable => {
-  const row = new BoxRenderable(renderer, { id: args.id, width: '100%', height: 1, flexShrink: 0, flexDirection: 'row', gap: 1 })
-  row.add(new TextRenderable(renderer, {
-    id: `${args.id}-text`,
-    content: args.author,
-    fg: args.fg,
-    flexGrow: 1,
-    // Yoga defaults flexShrink to 0, not to the CSS 1, so a long name would push the stamp
-    // off the row instead of giving ground to it.
-    flexShrink: 1,
-    minWidth: 0,
-    height: 1,
-    truncate: true
-  }))
-  if (args.posted !== '') {
-    // Yoga measures a text box from its content and then shrinks it anyway, so the stamp
-    // states its own width. Without it "5d" reaches the screen as "5".
-    row.add(new TextRenderable(renderer, {
-      id: `${args.id}-posted`,
-      content: args.posted,
-      fg: '#7d8590',
-      flexShrink: 0,
-      width: args.posted.length,
-      height: 1
-    }))
-  }
-  return row
-}
-
-const cardBox = (renderer: CliRenderer, id: string, selected: boolean): BoxRenderable => {
-  return new BoxRenderable(renderer, {
-    id,
-    width: '100%',
-    height: cardHeight,
-    border: true,
-    borderStyle: 'rounded',
-    borderColor: selected ? '#58a6ff' : '#30363d',
-    backgroundColor: selected ? '#111b2b' : '#0d1117',
-    paddingX: 1,
-    flexDirection: 'row',
-    gap: 1
-  })
-}
-
-// Terminal coordinates are 1-based; a slot that spills past its pane is dropped so
-// the image never paints over a neighbouring panel.
-const toPlacement = (slot: ImageSlot, shape: 'circle' | 'rect', cell: CellSize, renderer: CliRenderer): ImagePlacement | undefined => {
-  const maxCols = slot.box.width
-  const maxRows = slot.box.height
-  // A clipped card shrinks its avatar box; drawing into the remainder looks squashed.
-  if (maxCols < (slot.minCols ?? 1) || maxRows < (slot.minRows ?? 1)) {
-    return undefined
-  }
-  const insidePane = slot.box.x >= slot.pane.x && slot.box.y >= slot.pane.y
-    && slot.box.x + maxCols <= slot.pane.x + slot.pane.width
-    && slot.box.y + maxRows <= slot.pane.y + slot.pane.height
-  const onScreen = slot.box.x + maxCols <= renderer.terminalWidth && slot.box.y + maxRows <= renderer.terminalHeight
-  if (!insidePane || !onScreen) {
-    return undefined
-  }
-  const fit = slot.width && slot.height ? fitCells(slot.width, slot.height, maxCols, maxRows, cell) : { cols: maxCols, rows: maxRows }
-  return { key: slot.key, url: slot.url, shape, col: slot.box.x + 1, row: slot.box.y + 1, cols: fit.cols, rows: fit.rows }
-}
-
 // The quote card is the only clickable target that is not obvious, so the hint line
 // states it both ways: how to go in, and how to come back out. The depth counts quotes
 // and replies alike, because both push onto the same stack.
@@ -1879,16 +1756,6 @@ export const detailHint = (tweet: AppTweet | undefined, depth: number, hasParent
   return parts.join('  ·  ')
 }
 
-// x.com labels a reposted tweet with the name of whoever put it in the feed. Everything
-// else on the card already belongs to the original author.
-export const repostPill = (tweet: AppTweet): string =>
-  tweet.repostedBy ? `↻ ${tweet.repostedBy.name} · ` : ''
-
-// An article is a headline over thousands of characters. Without a badge the card reads as
-// an ordinary tweet whose text happens to stop after the title. It goes in front of the
-// name, because a card line is narrow and a truncated line loses its end first.
-export const articlePill = (tweet: AppTweet | undefined): string => (tweet?.article ? '▤ article · ' : '')
-
 // Where you stand with the author, in the two facts x.com puts on a profile: whether you
 // follow them, and whether they follow you. A relationship X did not state says nothing
 // rather than guess, and it rides in front of the stamp because a cut line loses its end.
@@ -1909,19 +1776,6 @@ export const postedPill = (tweet: AppTweet | undefined, now: Date): string => {
   const stamp = relativeTime(tweet?.createdAt, now)
   return stamp === '' ? '' : `  ·  ${stamp}`
 }
-
-// x.com fills the heart on a tweet you have liked. A count alone cannot show that, so the
-// filled glyph carries it here.
-export const likeCount = (tweet: AppTweet): string =>
-  `${tweet.favorited === true ? '♥ ' : ''}${tweet.metrics.likes ?? 0} likes`
-
-// A bookmark is private, so the count says little and the card is narrow. The card shows
-// only whether this reader holds one; the detail pane below carries the number.
-export const bookmarkCount = (tweet: AppTweet): string =>
-  `${tweet.bookmarked === true ? '⚑ ' : ''}${tweet.metrics.bookmarks ?? 0} bookmarks`
-
-const cardMetrics = (tweet: AppTweet): string =>
-  `${tweet.metrics.replies ?? 0} replies   ${tweet.metrics.reposts ?? 0} reposts   ${likeCount(tweet)}${tweet.bookmarked === true ? '   ⚑' : ''}`
 
 // A tab the reader made is named by the query it holds; the three fixed tabs carry their
 // own names.
