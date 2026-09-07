@@ -258,6 +258,28 @@ Multiplexers often swallow the terminal's pixel-size query. tweeter then assumes
 export TWEETER_CELL_PX=19x44
 ```
 
+## Headless posting
+
+`tweeter post` and `tweeter reply` write to X without the TUI. They print one JSON object on stdout and say what happened in the exit code, so a script or an agent can read the answer.
+
+```bash
+tweeter post  --text 'shipped the thing'
+tweeter reply --to https://x.com/alice/status/1234 --text 'agreed'
+tweeter post  --text-file draft.md          # "-" reads stdin
+tweeter reply --to 1234 --text 'agreed' --dry-run
+```
+
+`--to` takes a bare tweet id or any x.com status URL. `--dry-run` reports the text it would have sent and posts nothing; it never reads the config, so it also works on a machine with no cookies.
+
+```json
+{"ok":true,"command":"reply","tweetId":"77","url":"https://x.com/i/status/77","inReplyTo":"1234"}
+{"ok":false,"command":"post","error":"this request looks like it might be automated","code":226,"status":200}
+```
+
+Exit codes: `0` posted (or dry run), `1` X refused the write or no profile is configured, `2` the arguments are wrong.
+
+Both commands go through the same cookies and the same `CreateTweet` mutation the TUI uses, so anything that works in the TUI works here.
+
 ## Useful env vars
 
 - `TWEETER_CONFIG_DIR` — override config dir for tests/dev (default `~/.config/tweeter`)
@@ -273,6 +295,8 @@ tweeter --check-auth [--profile name]
 tweeter --set-cookie-header 'name=value; ...' [--profile name]
 tweeter --reset-auth
 tweeter auth twitter --client-id <id> [--profile name] [--port N] [--no-browser]
+tweeter post  --text <text> | --text-file <path> [--profile name] [--dry-run]
+tweeter reply --to <id|url> --text <text> | --text-file <path> [--profile name] [--dry-run]
 ```
 
 ## MVP status
