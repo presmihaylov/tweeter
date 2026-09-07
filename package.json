@@ -23,7 +23,7 @@
     "check": "bun run typecheck && bun run lint && bun test"
   },
   "dependencies": {
-    "@opentui/core": "0.3.0",
+    "@opentui/core": "0.3.1",
     "@opentui/keymap": "0.3.0",
     "@opentui/react": "0.3.0",
     "react": "19.1.1",
