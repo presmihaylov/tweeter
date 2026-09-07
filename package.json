@@ -7,6 +7,11 @@
   "bin": {
     "tweeter": "./dist/cli.js"
   },
+  "exports": {
+    ".": "./src/embed/index.ts",
+    "./embed": "./src/embed/index.ts",
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "dev": "bun run src/cli.ts",
     "build": "rm -rf dist && bun build src/cli.ts --target=bun --outdir=dist --entry-naming=cli.js && chmod +x dist/cli.js",
